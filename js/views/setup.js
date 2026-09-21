@@ -29,7 +29,7 @@ function draw() {
       <li>Create or pick a Notion page to hold the databases, and share it with the integration: open the page → <code>•••</code> → Connections → add it.</li>
     </ol>
     <form id="setup-token">
-      ${field('Internal integration secret', `<input name="token" type="password" autocomplete="off" autocapitalize="off" spellcheck="false" placeholder="ntn_… or secret_…" value="${attr(S.token)}" autofocus required>`)}
+      ${field('Access token (internal integration secret)', `<input name="token" type="password" autocomplete="off" autocapitalize="off" spellcheck="false" placeholder="ntn_… or secret_…" value="${attr(S.token)}" autofocus required>`)}
       <button class="btn primary wide" type="submit" ${S.busy ? 'disabled' : ''}>${S.busy || 'Connect'}</button>
       ${S.err ? `<p class="err">${esc(S.err)}</p>` : ''}
       <p class="note" style="margin-top:12px">The secret is saved in this browser only. Notion's API refuses calls from a browser, so requests pass through a relay on this domain that forwards them and keeps nothing.</p>
