@@ -364,6 +364,43 @@ const addDays = (s, n) => { const [y, m, d] = s.split('-').map(Number); const dt
   await page.screenshot({ path: `${SHOTS}/12-settings-light.png`, fullPage: true });
   await page.click('[data-act=pref-theme][data-v=auto]');
 
+  /* ── 14b. External calendar feed ─────────────────────────── */
+  await page.fill('#feed-add-form input[name=name]', 'Work');
+  await page.fill('#feed-add-form input[name=url]', 'http://127.0.0.1:4999/ics/test.ics');
+  await page.click('#feed-add-form button[type=submit]');
+  await toastIs(/Calendar added/);
+  await page.waitForFunction(() => /fetched just now/.test(document.querySelector('#view')?.textContent || ''));
+  await go('#/calendar');
+  await page.waitForSelector('.feed-legend');
+  await page.waitForFunction(() => /Dentist/.test(document.querySelector('#view')?.textContent || ''));
+  const pad = n => String(n).padStart(2, '0');
+  const dent = new Date(); dent.setUTCHours(13, 0, 0, 0);
+  const expectTime = `${pad(dent.getHours())}:${pad(dent.getMinutes())}`;
+  const dentistRow = await page.textContent('.event:has-text("Dentist")');
+  assert.ok(dentistRow.includes(expectTime), `event shows local time ${expectTime}: ${dentistRow}`);
+  assert.match(dentistRow, /High Street/);
+  assert.match(await textOf('#view'), /Conference/);
+  assert.ok(!/Cancelled thing/.test(await textOf('#view')), 'cancelled events are hidden');
+  assert.ok(/Standup/.test(await textOf('#view')), 'recurring events expand');
+  await page.screenshot({ path: `${SHOTS}/15-calendar-unified.png`, fullPage: true });
+  /* toggle the feed off and on */
+  await page.click('.pill.feed');
+  await page.waitForFunction(() => !/High Street/.test(document.querySelector('#view')?.textContent || ''));
+  await page.click('.pill.feed');
+  await page.waitForFunction(() => /High Street/.test(document.querySelector('#view')?.textContent || ''));
+  /* export */
+  const [dl] = await Promise.all([page.waitForEvent('download'), page.click('[data-act=cal-export]')]);
+  assert.equal(dl.suggestedFilename(), 'gtd-calendar.ics');
+  const icsText = require('fs').readFileSync(await dl.path(), 'utf8');
+  assert.match(icsText, /BEGIN:VCALENDAR/); assert.match(icsText, /SUMMARY:Dentist appointment/);
+  /* add-to-calendar links on a dated item */
+  await page.click(`[data-act=cal-day][data-v="${addDays(todayISO(), 1)}"]`);
+  await page.click('#view .item:has-text("Dentist appointment")');
+  await page.waitForSelector('#sheet a[href^="https://calendar.google.com/"]');
+  assert.ok(await page.$('#sheet a[href^="https://outlook.live.com/"]'));
+  await page.keyboard.press('Escape');
+  await page.click('[data-act=cal-clear]');
+
   /* ── 15. Search ───────────────────────────────────────────── */
   await page.click('#btn-search');
   await page.waitForSelector('#search-q');
@@ -372,10 +409,15 @@ const addDays = (s, n) => { const [y, m, d] = s.split('-').map(Number); const dt
   assert.equal(await page.evaluate(() => document.activeElement.id), 'search-q', 'typing keeps focus');
 
   /* ── 16. Cache and incremental sync ───────────────────────── */
+  await resetLog();
   await page.reload();
   await page.waitForSelector('#app:not([hidden])');
   const cached = await page.evaluate(() => JSON.parse(localStorage.getItem('gtd.cache')).items.length);
   assert.ok(cached >= 5, 'cache holds the items');
+  await page.waitForFunction(() => /synced/.test(document.querySelector('#sync-line')?.textContent || ''));
+  await page.waitForTimeout(300);
+  const bootQueries = (await mockLog()).filter(l => /\/query$/.test(l.path));
+  assert.ok(bootQueries.length && bootQueries.every(l => l.body.filter?.timestamp === 'last_edited_time'), 'a reload syncs incrementally, not fully');
   /* edit a page "in Notion" and sync incrementally */
   await resetLog();
   const dentist = Object.values(st.pages).find(p => p.properties.Name?.title[0].plain_text === 'Call the dentist');

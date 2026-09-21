@@ -6,6 +6,7 @@ import { sync, refreshOptions, NotionError } from './notion.js';
 import { esc, toast, closeSheet, sheetOpen, toggleFold } from './ui.js';
 import { inboxItems, nextItems, waitingItems, stalledProjects, dueTickler, reviewDueIn, activeHabits, habitDue, habitDoneToday } from './model.js';
 import * as A from './actions.js';
+import { refreshFeeds } from './feeds.js';
 import * as item from './views/item.js';
 import * as clarify from './views/clarify.js';
 import * as setup from './views/setup.js';
@@ -129,6 +130,7 @@ async function doSync({ full = false, quiet = false } = {}) {
     if (prefs().autoTickler) { const due = dueTickler(); if (due.length) { await A.surfaceTickler(due); surfaced = due.length; } }
     if (surfaced) toast(`Synced · ${surfaced} tickler item${surfaced > 1 ? 's' : ''} back in the Inbox`, 3500);
     else if (!quiet && needFull) toast('Synced with Notion');
+    if (await refreshFeeds({ force: full })) render();
   } catch (e) {
     state.loading = false;
     state.error = e.message;
@@ -220,6 +222,7 @@ document.addEventListener('keydown', e => {
 
 document.addEventListener('gtd:render', () => render());
 document.addEventListener('gtd:sync', e => doSync(e.detail || {}));
+document.addEventListener('gtd:feeds', async () => { await refreshFeeds({ force: true }); render(); });
 document.addEventListener('gtd:theme', applyTheme);
 document.addEventListener('gtd:setup-done', () => bootApp());
 window.addEventListener('hashchange', onRoute);

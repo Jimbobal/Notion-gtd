@@ -8,6 +8,8 @@ import { STATUS_LABEL, fmtWhen, ago, projectById, horizonById } from '../model.j
 import { ENERGY, REPEATS } from '../notion.js';
 import * as A from '../actions.js';
 import { startClarify } from './clarify.js';
+import { calendarLinks } from '../feeds.js';
+import { buildICS } from '../ics.js';
 
 const MOVES = ['Inbox','Next','Calendar','Waiting','Someday','Tickler','Reference'];
 
@@ -33,6 +35,13 @@ export function openItem(id) {
       <button class="btn" data-act="item-edit" data-id="${i.id}">Edit</button>
       ${i.status !== 'Done' && i.status !== 'Trash' ? `<button class="btn" data-act="item-focus" data-id="${i.id}">${i.focus ? 'Unfocus' : '★ Focus'}</button>` : ''}
     </div>
+    ${i.date && i.status !== 'Done' && i.status !== 'Trash' ? (() => { const l = calendarLinks(i); return `
+    <div class="section-head" style="margin-top:14px"><h3>Add to calendar</h3></div>
+    <div class="pills wrap">
+      <a class="pill small" href="${attr(l.google)}" target="_blank" rel="noopener">Google Calendar</a>
+      <a class="pill small" href="${attr(l.outlook)}" target="_blank" rel="noopener">Outlook</a>
+      <button class="pill small" data-act="item-ics" data-id="${i.id}">.ics file</button>
+    </div>`; })() : ''}
     <div class="section-head" style="margin-top:14px"><h3>Move to</h3></div>
     <div class="pills wrap">${MOVES.filter(s => s !== i.status).map(s =>
       `<button class="pill small" data-act="item-move" data-id="${i.id}" data-v="${s}">${STATUS_LABEL[s]}</button>`).join('')}</div>
@@ -116,6 +125,14 @@ export async function act(name, el, ev) {
     case 'item-move':    closeSheet(); await A.moveItem(id, el.dataset.v); return true;
     case 'item-trash':   closeSheet(); await A.trashItem(id); return true;
     case 'item-restore': closeSheet(); await A.restoreItem(id); return true;
+    case 'item-ics': {
+      const i = A.itemById(id);
+      const a = document.createElement('a');
+      a.href = URL.createObjectURL(new Blob([buildICS([i])], { type: 'text/calendar' }));
+      a.download = `${i.name.replace(/[^\w-]+/g, '-').slice(0, 40) || 'item'}.ics`; document.body.appendChild(a); a.click();
+      setTimeout(() => { URL.revokeObjectURL(a.href); a.remove(); }, 1000);
+      return true;
+    }
     case 'item-delete':  if (confirm('Delete this item for good? It stays in Notion’s trash for 30 days.')) { closeSheet(); await A.deleteForever('items', id); } return true;
   }
   return false;

@@ -36,6 +36,7 @@ export const state = {
   contexts: [],       // select options on Items.Context, in Notion's order
   tags: [],           // multi_select options on Items.Tags
   syncedAt: null,     // last successful sync, ms
+  lastFullSync: null, // last sync that replaced everything, ms
   loading: false,
   error: null,
   route: { name: 'inbox', id: null, q: '' },
@@ -48,12 +49,13 @@ export function loadCache() {
   for (const k of ['items','projects','horizons','habits','habitLog','perspectives','contexts','tags'])
     state[k] = c[k] || [];
   state.syncedAt = c.syncedAt || null;
+  state.lastFullSync = c.lastFullSync || null;
   return true;
 }
 
 export function saveCache() {
-  const { items, projects, horizons, habits, habitLog, perspectives, contexts, tags, syncedAt } = state;
-  store.set(LS.cache, { items, projects, horizons, habits, habitLog, perspectives, contexts, tags, syncedAt });
+  const { items, projects, horizons, habits, habitLog, perspectives, contexts, tags, syncedAt, lastFullSync } = state;
+  store.set(LS.cache, { items, projects, horizons, habits, habitLog, perspectives, contexts, tags, syncedAt, lastFullSync });
 }
 
 export function clearAll() {

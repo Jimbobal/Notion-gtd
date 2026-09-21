@@ -73,6 +73,16 @@ function start(port) {
     req.on('data', c => data += c);
     req.on('end', () => {
       const url = new URL(req.url, 'http://mock');
+      if (url.pathname === '/ics/test.ics') {
+        const d = new Date(); const day = n => { const x = new Date(d.getFullYear(), d.getMonth(), d.getDate() + n); return `${x.getFullYear()}${String(x.getMonth()+1).padStart(2,'0')}${String(x.getDate()).padStart(2,'0')}`; };
+        const ics = ['BEGIN:VCALENDAR', 'VERSION:2.0', 'PRODID:-//mock//EN',
+          'BEGIN:VEVENT', 'UID:dentist@mock', `DTSTART:${day(0)}T130000Z`, `DTEND:${day(0)}T140000Z`, 'SUMMARY:Dentist', 'LOCATION:High Street', 'END:VEVENT',
+          'BEGIN:VEVENT', 'UID:conf@mock', `DTSTART;VALUE=DATE:${day(1)}`, `DTEND;VALUE=DATE:${day(3)}`, 'SUMMARY:Conference', 'END:VEVENT',
+          'BEGIN:VEVENT', 'UID:standup@mock', 'DTSTART:20260105T093000Z', 'DTEND:20260105T094500Z', 'RRULE:FREQ=WEEKLY;BYDAY=MO,WE,FR', 'SUMMARY:Standup', 'END:VEVENT',
+          'BEGIN:VEVENT', 'UID:gone@mock', 'STATUS:CANCELLED', `DTSTART:${day(0)}T150000Z`, 'SUMMARY:Cancelled thing', 'END:VEVENT',
+          'END:VCALENDAR', ''].join('\r\n');
+        res.writeHead(200, { 'Content-Type': 'text/calendar' }); return res.end(ics);
+      }
       if (url.pathname === '/__log') return send(res, 200, log);
       if (url.pathname === '/__reset') { log.length = 0; return send(res, 200, {}); }
       if (url.pathname === '/__state') return send(res, 200, { dbs, pages });
