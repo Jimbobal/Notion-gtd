@@ -156,7 +156,7 @@ js/views/*.js                one module per screen; the clarify wizard; item she
 js/google.js                 Google sign-in and authenticated fetch
 js/gcal.js                   Google Calendar: read, write, mirror items
 js/files.js                  Drive picker, Dropbox chooser, links
-js/ics.js, js/feeds.js       iCalendar reader; calendar sources and cache
+js/sources.js, js/ics.js     calendar sources for the view; .ics export
 api/notion/[...path].js      the Notion relay
 dev-server.js                static files + relay, locally
 test/                        mock Notion, Google/Dropbox stubs, relay tests, end-to-end
