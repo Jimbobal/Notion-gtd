@@ -90,9 +90,11 @@ export function render() {
   const title = typeof v.title === 'function' ? v.title(r) : v.title;
   $('view-title').textContent = title;
   document.title = `${title} · GTD`;
+  document.body.dataset.route = r.name;
   const focused = document.activeElement?.id;
   const caret = document.activeElement?.selectionStart;
   $('view').innerHTML = state.loading && !state.items.length && !state.syncedAt ? '<div class="spinner"></div>' : v.render(r);
+  v.mounted?.(r);
   if (renderSoft && focused) { const el = $(focused); if (el) { el.focus(); try { el.setSelectionRange(caret, caret); } catch {} } }
   renderSoft = false;
   syncLine();

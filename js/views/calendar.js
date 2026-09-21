@@ -5,24 +5,21 @@
 'use strict';
 import { list, head, section, empty, esc, attr, openSheet, closeSheet, toast, field, options } from '../ui.js';
 import { datedItems, ticklerItems, today, addDays, addMonths, startOfWeek, dayOf, fmtDay, parseDay, isOverdue } from '../model.js';
-import { events, sources, sourceById, toggleSource, eventById, PROVIDERS, writableTargets, parseTarget, refreshProvider } from '../calendars.js';
+import { events, visibleEvents, sources, sourceById, toggleSource, eventById, PROVIDERS, writableTargets, parseTarget, refreshProvider } from '../calendars.js';
+import { renderWeek, mountWeek, setHooks, act as weekAct } from './week.js';
+import { prefs, savePrefs } from '../store.js';
 import { buildICS } from '../ics.js';
 import { openEdit } from './item.js';
 import * as A from '../actions.js';
 
 let sel = null;          // selected day, or null for the agenda
 let monthAt = null;      // first day of the month shown, or null for the week strip
+let weekAt = null;       // Monday (or the preferred week start) of the week shown
+const mode = () => prefs().calMode || 'week';   // agenda | week | month
 export const title = () => 'Calendar';
 
 const byDay = items => { const m = {}; for (const i of items) (m[dayOf(i.date)] ||= []).push(i); return m; };
 const sortDated = a => [...a].sort((x, y) => (x.date < y.date ? -1 : x.date > y.date ? 1 : 0));
-
-/* Events an item already stands for: mirrored copies, and events an item
-   was made from. Shown once, as the item. */
-import { state } from '../store.js';
-import { parseRef } from '../calendars.js';
-const linked = () => new Set(state.items.filter(i => i.eventId && i.status !== 'Trash').map(i => { const r = parseRef(i.eventId); return r ? `${r.kind}:${r.calendarId}:${r.eventId}` : ''; }));
-const visibleEvents = () => { const l = linked(); return events().filter(e => !e.gtdItem && !l.has(e.id)); };
 
 /* Events keyed by day; a multi-day all-day event appears on each day. */
 function eventsByDay() {
@@ -67,6 +64,16 @@ export function render() {
     ? `<div class="feed-legend">${srcs.map(s => `<button class="pill small feed ${s.on ? 'is-on' : ''}" data-act="cal-source" data-id="${attr(s.id)}" style="--fc:${s.color}"><i class="feed-dot"></i>${esc(s.name)}</button>`).join('')}
         <button class="pill small" data-act="cal-export" title="Download your dated items as .ics">⤓ .ics</button></div>`
     : `<p class="hint">See and edit your Google or Outlook calendar here: connect it in <a href="#/integrations">Integrations</a>. <button class="link-btn" data-act="cal-export">Export your items as .ics</button></p>`;
+
+  const modes = `<div class="pills" style="margin-bottom:8px">${[['agenda','Agenda'],['week','Week'],['month','Month']].map(([v, l]) => `<button class="pill small ${mode() === v ? 'is-on' : ''}" data-act="cal-mode" data-v="${v}">${l}</button>`).join('')}</div>`;
+
+  if (mode() === 'week' && !sel) {
+    const ws = weekAt || startOfWeek(t);
+    const nav = `<div class="month-nav"><button class="pill small" data-act="cal-weeknav" data-v="-1">‹</button>
+        <b>${fmtDay(ws)} – ${fmtDay(addDays(ws, 6))}</b>
+        <span><button class="pill small" data-act="cal-weeknav" data-v="1">›</button> <button class="pill small" data-act="cal-today">This week</button></span></div>`;
+    return legend + modes + nav + renderWeek(ws);
+  }
 
   let picker;
   if (monthAt) {
@@ -121,14 +128,16 @@ export function render() {
       + (laterEv.length ? `<p class="hint">${laterEv.length} more event${laterEv.length > 1 ? 's' : ''} further out — open the month view.</p>` : '')
       + (!items.length && !events().length ? empty('Nothing scheduled', '<br>Calendar entries, deadlines on next actions and chase-by dates all show here.') : '');
   }
-  return legend + picker + body;
+  return legend + modes + picker + body;
 }
+
+export function mounted() { if (mode() === 'week' && !sel) mountWeek(); }
 
 /* ── Google event sheet ────────────────────────────────── */
 function eventForm(e = {}, o = {}) {
   const targets = writableTargets();
   const day = e.day || o.day || today();
-  const time = e.allDay === false ? e.start.slice(11) : '';
+  const time = e.allDay === false ? e.start.slice(11) : (o.time || '');
   const endTime = e.allDay === false && e.end.slice(0, 10) === e.start.slice(0, 10) ? e.end.slice(11) : '';
   return `<h3>${e.id ? 'Edit event' : 'New event'}</h3>
     <form id="gevent-form" data-id="${attr(e.eventId || '')}" data-cal="${attr(e.calendarId || '')}" data-kind="${attr(e.kind || '')}">
@@ -160,6 +169,12 @@ function openEvent(id) {
     </div>`);
 }
 
+setHooks({
+  newEvent: (day, time) => openSheet(eventForm({}, { day, time })),
+  openDay: day => { savePrefs({ calMode: 'agenda' }); sel = day; document.dispatchEvent(new CustomEvent('gtd:render')); },
+});
+document.addEventListener('gtd:open-event', e => openEvent(e.detail.id));
+
 function download(name, text) {
   const a = document.createElement('a');
   a.href = URL.createObjectURL(new Blob([text], { type: 'text/calendar' }));
@@ -169,10 +184,13 @@ function download(name, text) {
 
 export async function act(name, el) {
   const v = el.dataset.v, id = el.dataset.id;
+  if (await weekAct(name, el)) return true;
   switch (name) {
+    case 'cal-mode':  savePrefs({ calMode: v }); sel = null; monthAt = v === 'month' ? (today().slice(0, 8) + '01') : null; return 'render';
+    case 'cal-weeknav': weekAt = addDays(weekAt || startOfWeek(today()), 7 * Number(v)); return 'render';
     case 'cal-day':   sel = sel === v ? null : v; return 'render';
     case 'cal-clear': sel = null; return 'render';
-    case 'cal-today': sel = null; monthAt = null; return 'render';
+    case 'cal-today': sel = null; monthAt = null; weekAt = null; return 'render';
     case 'cal-week':  monthAt = null; return 'render';
     case 'cal-month': monthAt = v === '0' ? (sel || today()).slice(0, 8) + '01' : addMonths(monthAt, Number(v)); return 'render';
     case 'cal-add':   openEdit(null, { status: 'Calendar', day: v }); return true;

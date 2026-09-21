@@ -25,5 +25,6 @@ for i in $(seq 1 30); do curl -s -o /dev/null "http://localhost:$APP_PORT/" && c
 
 NODE_PATH="${NODE_PATH:-$(npm root -g)}" node test/e2e.js
 status=$?
+[ $status -eq 0 ] || echo "E2E FAILED (exit $status)"
 stop
 exit $status

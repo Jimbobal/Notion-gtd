@@ -62,7 +62,7 @@ export function itemForm(i = {}, o = {}) {
     </div>
     <div class="row2">
       ${field('Date', `<input type="date" name="day" value="${attr(day || o.day || '')}">`)}
-      ${field('Time of day', `<input type="time" name="time" value="${attr(time)}">`)}
+      ${field('Time of day', `<input type="time" name="time" value="${attr(time || o.time || '')}">`)}
     </div>
     <div class="row3">
       ${field('Minutes', `<input type="number" name="time_mins" inputmode="numeric" min="0" step="5" value="${i.time ?? ''}" placeholder="—">`)}

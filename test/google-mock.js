@@ -108,7 +108,7 @@ async function install(page, { clientId = 'client-123' } = {}) {
     const u = new URL(req.url());
     const json = (status, body) => route.fulfill({ status, contentType: 'application/json', body: JSON.stringify(body) });
     const auth = req.headers().authorization || '';
-    G.log.push({ method: req.method(), path: u.pathname, auth });
+    G.log.push({ method: req.method(), path: u.pathname, auth, body: ['PATCH','POST'].includes(req.method()) ? req.postDataJSON() : null });
     if (auth !== `Bearer tok_${clientId}`) return json(401, { error: { message: 'Invalid Credentials' } });
     const p = u.pathname;
     if (p === '/oauth2/v3/userinfo') return json(200, { email: 'james@example.com', sub: '1' });

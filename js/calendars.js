@@ -25,6 +25,13 @@ export function events() {
 }
 export const eventById = id => events().find(e => e.id === id) || null;
 
+/* Events an item already stands for — mirrored copies, and events an item
+   was made from — are shown once, as the item. */
+export function visibleEvents() {
+  const linked = new Set(state.items.filter(i => i.eventId && i.status !== 'Trash').map(i => { const r = parseRef(i.eventId); return r ? `${r.kind}:${r.calendarId}:${r.eventId}` : ''; }));
+  return events().filter(e => !e.gtdItem && !linked.has(e.id));
+}
+
 export async function refreshAll({ force = false } = {}) {
   let changed = false;
   for (const p of Object.values(PROVIDERS)) { try { if (await p.refresh({ force })) changed = true; } catch {} }

@@ -13,7 +13,7 @@ The FacileThings model, end to end:
 | **Inbox** | Everything captured and not yet decided. `n` or ＋ captures from anywhere. |
 | **Clarify** | The processing questions, one at a time: what is it, is it actionable, one step or a project, under two minutes, am I the right person, when. Every answer files the item; *Clarify all* walks the whole Inbox. |
 | **Next Actions** | Engage: filter by context, energy and time; focus items first; the rest grouped by context. |
-| **Calendar** | The unified calendar: your own dated items (calendar entries, deadlines on next actions, chase-by dates) together with your Google and Outlook calendars, day by day, as a rolling week, a month grid and an agenda. Events can be edited, deleted and created here, and turned into GTD items. |
+| **Calendar** | The unified calendar: your own dated items (calendar entries, deadlines on next actions, chase-by dates) together with your Google and Outlook calendars. A **week grid** (seven days across, hours down) where you tap a block to open it, tap an empty slot to add an item or an event there, drag a block to move it and drag its edge to change its length; plus an agenda and a month grid. Events can be edited, deleted and created here, and turned into GTD items. |
 | **Waiting For** | Grouped by person, with a *Chase* section for anything past its date or older than two weeks. |
 | **Projects** | Stalled projects (no next action) listed first, because that is what GTD exists to catch. A project page shows its outcome, every action by list, and completes with its open actions. |
 | **Someday / Maybe**, **Tickler**, **Reference** | The three parking lists. Tickler items return to the Inbox on their day. |
@@ -63,10 +63,11 @@ Sign-in happens in the browser (Google Identity Services, MSAL); there is no
 server and no client secret. Then:
 
 - **See and edit.** Events from the calendars you tick appear in the Calendar
-  beside your items, colour-coded per calendar. Tap one to change its title,
-  day, times, location or notes, delete it, or make a GTD item from it. A
-  day's *+ Event* creates one in any calendar you can write to, Google or
-  Outlook.
+  beside your items, colour-coded per calendar. In the week grid, drag a
+  block to another slot or day and it moves in Google or Outlook; drag its
+  bottom edge to change its length. Tap one to change its title, day, times,
+  location or notes, delete it, or make a GTD item from it. Tapping an empty
+  slot creates an item or an event there, in any calendar you can write to.
 - **Mirror your items.** Switch on the calendar mirror and pick one calendar,
   Google or Outlook: every item on your Calendar list becomes an event there,
   kept in step as the item changes and removed when it leaves the list. The
@@ -157,7 +158,7 @@ js/notion.js                 relay client, schema, setup, sync, writes
 js/model.js                  the GTD model: lists, projects, habits, review, stats
 js/actions.js                every write, with toasts and rollback
 js/ui.js                     rows, chips, sections, the sheet
-js/views/*.js                one module per screen; the clarify wizard; item sheet
+js/views/*.js                one module per screen; the clarify wizard; item sheet; the week grid
 js/google.js, js/gcal.js     Google sign-in; Google Calendar read and write
 js/microsoft.js, js/mscal.js Microsoft sign-in; Outlook calendar read and write
 js/calendars.js              both providers behind one interface; the mirror

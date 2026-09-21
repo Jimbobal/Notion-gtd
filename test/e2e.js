@@ -27,7 +27,8 @@ const addDays = (s, n) => { const [y, m, d] = s.split('-').map(Number); const dt
   page.on('console', m => { if (m.type() === 'error' && !/401|404|400 \(/.test(m.text())) errors.push(m.text()); });
   page.on('dialog', d => d.accept());
   const G = await gmock.install(page);
-  const toastIs = re => page.waitForFunction(r => new RegExp(r).test(document.querySelector('#toast')?.textContent || ''), re.source, { timeout: 8000 });
+  const toastIs = async re => { try { await page.waitForFunction(r => new RegExp(r).test(document.querySelector('#toast')?.textContent || ''), re.source, { timeout: 8000 }); }
+    catch (e) { throw new Error(`toast ${re} not seen; last toast: "${await page.textContent('#toast')}"`); } };
   const go = async h => { await page.evaluate(h => { location.hash = h; }, h); await page.waitForTimeout(150); };
   const textOf = sel => page.textContent(sel);
 
@@ -58,6 +59,8 @@ const addDays = (s, n) => { const [y, m, d] = s.split('-').map(Number); const dt
   const cfg = await page.evaluate(() => JSON.parse(localStorage.getItem('gtd.cfg')));
   assert.equal(cfg.parentTitle, 'GTD Home');
   assert.equal(Object.keys(cfg.dbs).length, 7);
+
+  await page.evaluate(() => localStorage.setItem('gtd.prefs', JSON.stringify({ calMode: 'agenda' })));
 
   /* ── 2. Capture ───────────────────────────────────────────── */
   const capture = async (name, notes = '') => {
@@ -574,6 +577,83 @@ const addDays = (s, n) => { const [y, m, d] = s.split('-').map(Number); const dt
   assert.ok(!G.ms.events['cal-work'].some(e => e.subject === 'Client call'));
   await page.screenshot({ path: `${SHOTS}/18-calendar-outlook.png`, fullPage: true });
 
+  /* ── 14g. The week grid: tap, add, drag, resize ───────────── */
+  await go('#/calendar');
+  await page.click('[data-act=cal-mode][data-v=week]');
+  await page.waitForSelector('#wk');
+  assert.equal(await page.$$eval('.wk-day', els => els.length), 7);
+  assert.ok(await page.$('.wk-block.k-event:has-text("Standup (moved)")'), 'Google event on the grid');
+  assert.ok(await page.$('.wk-block.k-event:has-text("Project board (moved)")'), 'Outlook event on the grid');
+  assert.ok(await page.$('.wk-block.k-item:has-text("Site visit")'), 'timed item on the grid');
+  assert.ok(await page.$('.wk-chip:has-text("Team offsite")'), 'all-day item in the all-day row');
+  assert.ok(!(await page.$('.wk-chip.k-event:has-text("Team offsite")')), 'its original event is not shown twice');
+  const H = 44;
+  const top = await page.$eval('.wk-block.k-event:has-text("Standup (moved)")', el => parseFloat(el.style.top));
+  assert.equal(top, 9 * H, 'positioned at 09:00');
+  await page.screenshot({ path: `${SHOTS}/20-week.png` });
+  /* tap an empty slot → new item there */
+  const col = await page.$(`.wk-col[data-day="${addDays(todayISO(), 1)}"]`);
+  await col.scrollIntoViewIfNeeded();
+  const cb = await col.boundingBox();
+  await page.mouse.click(cb.x + cb.width / 2, cb.y + 14 * H + 5);
+  await page.waitForSelector('[data-act=wk-new-item]');
+  await page.click('[data-act=wk-new-item]');
+  await page.waitForSelector('#item-form');
+  assert.equal(await page.inputValue('#item-form input[name=day]'), addDays(todayISO(), 1));
+  assert.equal(await page.inputValue('#item-form input[name=time]'), '14:00');
+  await page.fill('#item-form input[name=name]', 'Deep work block');
+  await page.fill('#item-form input[name=time_mins]', '90');
+  await page.click('#item-form button[type=submit]');
+  await toastIs(/Added to Calendar/);
+  await page.waitForSelector('.wk-block.k-item:has-text("Deep work block")');
+  const deep = await page.$eval('.wk-block.k-item:has-text("Deep work block")', el => ({ top: parseFloat(el.style.top), h: parseFloat(el.style.height) }));
+  assert.equal(deep.top, 14 * H); assert.equal(deep.h, 1.5 * H - 2);
+  assert.ok(await page.$('.wk-block.k-item:has-text("Deep work block") .wk-resize'), 'a long block has a resize handle');
+  assert.ok(!(await page.$('.wk-block.k-event:has-text("Standup (moved)") .wk-resize')), 'a 15-minute block does not');
+  /* drag the Google event two hours later */
+  const drag = async (selector, dx, dy, fromBottom = false) => {
+    await page.evaluate(() => { const t = document.getElementById('toast'); t.hidden = true; t.textContent = ''; });
+    const el = await page.$(selector); await el.scrollIntoViewIfNeeded();
+    const b = await el.boundingBox();
+    const x = b.x + b.width / 2, y = fromBottom ? b.y + b.height - 3 : b.y + 5;
+    await page.mouse.move(x, y); await page.mouse.down();
+    for (let k = 1; k <= 8; k++) await page.mouse.move(x + dx * k / 8, y + dy * k / 8);
+    await page.mouse.up();
+  };
+  await drag('.wk-block.k-event:has-text("Standup (moved)")', 0, 2 * H);
+  await toastIs(/Event moved/);
+  const moved = G.events['james@example.com'].find(e => e.id === 'ev_standup');
+  assert.match(moved.start.dateTime, /T11:00:00$/); assert.match(moved.end.dateTime, /T11:15:00$/);
+  await page.waitForFunction(H => parseFloat(document.querySelector('.wk-block.k-event[data-block$="ev_standup"]')?.style.top) === 11 * H, H);
+  /* resize the item to two hours */
+  await drag('.wk-block.k-item:has-text("Deep work block")', 0, 0.5 * H, true);
+  await toastIs(/Saved/);
+  st = await mockState();
+  assert.equal(Object.values(st.pages).find(p => p.properties.Name?.title[0].plain_text === 'Deep work block').properties.Time.number, 120);
+  /* drag the item to the next day */
+  const colW = (await (await page.$('.wk-col')).boundingBox()).width;
+  await drag('.wk-block.k-item:has-text("Deep work block")', colW, 0);
+  await toastIs(/Saved/);
+  st = await mockState();
+  assert.match(Object.values(st.pages).find(p => p.properties.Name?.title[0].plain_text === 'Deep work block').properties.Date.date.start, new RegExp(`^${addDays(todayISO(), 2)}T14:00`));
+  /* the mirror followed the item into Outlook */
+  await page.waitForTimeout(300);
+  const deepEv = G.ms.events['cal-work'].find(e => e.subject === 'Deep work block');
+  assert.ok(deepEv && deepEv.start.dateTime.startsWith(`${addDays(todayISO(), 2)}T14:00`), 'Outlook copy moved too');
+  /* tap a block to open it; a day header opens that day's agenda */
+  await page.click('.wk-block.k-item:has-text("Deep work block")');
+  await page.waitForSelector('#sheet:not([hidden]) [data-act=item-edit]');
+  await page.keyboard.press('Escape');
+  await page.click('[data-act=cal-weeknav][data-v="1"]');
+  await page.waitForFunction(() => !document.querySelector('.wk-block.k-item[title="Deep work block"]'));
+  await page.click('[data-act=cal-today]');
+  await page.waitForSelector('.wk-block.k-item:has-text("Deep work block")');
+  await page.click(`[data-act=wk-day][data-v="${addDays(todayISO(), 2)}"]`);
+  await page.waitForFunction(() => /Deep work block/.test(document.querySelector('#view')?.textContent || '') && !document.getElementById('wk'));
+  await page.click('[data-act=cal-clear]');
+  await page.click('[data-act=cal-mode][data-v=agenda]');
+  await page.waitForSelector('.week-strip');
+
   /* ── 14e. Attachments: Drive, Dropbox, a Notion link ──────── */
   await go('#/waiting');
   await page.click('#view .item:has-text("Call the dentist")');
@@ -647,6 +727,11 @@ const addDays = (s, n) => { const [y, m, d] = s.split('-').map(Number); const dt
   await page.screenshot({ path: `${SHOTS}/13-desktop-next.png` });
   await go('#/review');
   await page.screenshot({ path: `${SHOTS}/14-desktop-review.png`, fullPage: true });
+  await go('#/calendar');
+  await page.click('[data-act=cal-mode][data-v=week]');
+  await page.waitForSelector('#wk');
+  await page.screenshot({ path: `${SHOTS}/21-desktop-week.png` });
+  await page.click('[data-act=cal-mode][data-v=agenda]');
 
   /* Disconnect Google: calendars drop out of the legend */
   await go('#/integrations');
