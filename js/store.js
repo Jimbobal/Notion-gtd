@@ -32,7 +32,7 @@ export const prefs     = () => ({ ...DEFAULT_PREFS, ...store.get(LS.prefs, {}) }
 export const savePrefs = patch => store.set(LS.prefs, { ...prefs(), ...patch });
 
 export const state = {
-  items: [], projects: [], horizons: [], habits: [], habitLog: [], perspectives: [],
+  items: [], projects: [], horizons: [], habits: [], habitLog: [], perspectives: [], review: [],
   contexts: [],       // select options on Items.Context, in Notion's order
   tags: [],           // multi_select options on Items.Tags
   syncedAt: null,     // last successful sync, ms
@@ -46,7 +46,7 @@ export const state = {
 export function loadCache() {
   const c = store.get(LS.cache, null);
   if (!c) return false;
-  for (const k of ['items','projects','horizons','habits','habitLog','perspectives','contexts','tags'])
+  for (const k of ['items','projects','horizons','habits','habitLog','perspectives','review','contexts','tags'])
     state[k] = c[k] || [];
   state.syncedAt = c.syncedAt || null;
   state.lastFullSync = c.lastFullSync || null;
@@ -54,8 +54,8 @@ export function loadCache() {
 }
 
 export function saveCache() {
-  const { items, projects, horizons, habits, habitLog, perspectives, contexts, tags, syncedAt, lastFullSync } = state;
-  store.set(LS.cache, { items, projects, horizons, habits, habitLog, perspectives, contexts, tags, syncedAt, lastFullSync });
+  const { items, projects, horizons, habits, habitLog, perspectives, review, contexts, tags, syncedAt, lastFullSync } = state;
+  store.set(LS.cache, { items, projects, horizons, habits, habitLog, perspectives, review, contexts, tags, syncedAt, lastFullSync });
 }
 
 export function clearAll() {

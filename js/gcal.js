@@ -1,13 +1,8 @@
-/* Google Calendar, both ways. Events from the calendars you pick are read
-   into the Calendar view; Google events can be created and edited from the
-   app; and, if you switch it on, every GTD item on the Calendar list is
-   mirrored as an event in one Google calendar of your choosing, kept in
-   step as the item changes, and removed when it leaves the list. */
+/* Google Calendar, both ways: read the calendars you pick, create and
+   edit events, and serve as a mirror target (see calendars.js). */
 'use strict';
 import { store } from './store.js';
 import { gfetch, gcfg, saveGoogle, googleConnected, NeedsGoogle } from './google.js';
-import * as N from './notion.js';
-import { state } from './store.js';
 
 const API = 'https://www.googleapis.com/calendar/v3';
 const LS_EVENTS = 'gtd.gevents';
@@ -52,7 +47,7 @@ function normalise(e, calId) {
   const s = allDay ? new Date(e.start.date + 'T00:00') : new Date(e.start.dateTime);
   const en = allDay ? new Date(e.end.date + 'T00:00') : new Date(e.end.dateTime);
   return {
-    id: `g:${calId}:${e.id}`, feedId: `g:${calId}`, kind: 'google', calendarId: calId, eventId: e.id,
+    id: `google:${calId}:${e.id}`, feedId: `google:${calId}`, kind: 'google', calendarId: calId, eventId: e.id,
     title: e.summary || '(untitled)', location: e.location || '', description: e.description || '',
     allDay, start: allDay ? isoDay(s) : isoMin(s), end: allDay ? isoDay(en) : isoMin(en),
     day: isoDay(s), days: allDay ? Math.max(1, Math.round((en - s) / 86400000)) : 1,
@@ -111,45 +106,13 @@ export async function deleteEvent(calId, eventId) {
   catch (e) { if (!/404|410|deleted|not found/i.test(e.message)) throw e; }
 }
 
-export const getEvent = (calId, eventId) => gfetch(`${API}/calendars/${enc(calId)}/events/${enc(eventId)}`);
-const isWritable = calId => googleCalendars().some(c => c.id === calId && c.writable);
-
-/* Mirror one GTD item into the chosen Google calendar. Called after every
-   write to an item; decides for itself whether an event should exist.
-   An event the item was made from (a Google-native event) is updated in
-   place where that calendar is writable and never deleted; only events
-   this app created are removed when the item leaves the Calendar list. */
-export async function syncItemToGoogle(item) {
-  const g = gcfg();
-  if (!g.syncItems || !g.writeCalendar || !googleConnected() || !item) return null;
-  const [calId, evId] = (item.eventId || '').split('/');
-  const wants = item.status === 'Calendar' && !!item.date;
-  const ours = async () => { try { const e = await getEvent(calId, evId); return e?.extendedProperties?.private?.gtdItem === item.id; } catch { return false; } };
-  if (wants) {
-    const hasTime = item.date.length > 10;
-    const d = new Date(item.date);
-    const f = { title: item.name, day: item.date.slice(0, 10), time: hasTime ? `${pad2(d.getHours())}:${pad2(d.getMinutes())}` : '',
-                allDay: !hasTime, minutes: item.time || 30, location: '', itemId: item.id,
-                description: [item.notes, item.url ? `Notion: ${item.url}` : ''].filter(Boolean).join('\n\n') };
-    let ev = null;
-    if (evId && isWritable(calId)) {
-      ev = await updateEvent(calId, evId, eventBody(f)).catch(e => /404|410/i.test(e.message) ? null : Promise.reject(e));
-      if (ev) return ev;
-    } else if (evId) return null;   // linked to a read-only calendar: leave it be
-    ev = await createEvent(g.writeCalendar, eventBody(f));
-    await N.updateItem(item.id, { eventId: `${g.writeCalendar}/${ev.id}` });
-    return ev;
-  }
-  if (evId) {
-    if (isWritable(calId) && await ours()) await deleteEvent(calId, evId);
-    if (state.items.some(i => i.id === item.id)) await N.updateItem(item.id, { eventId: '' });
-  }
-  return null;
+export async function getEvent(calId, eventId) {
+  const e = await gfetch(`${API}/calendars/${enc(calId)}/events/${enc(eventId)}`);
+  return { ...e, gtdItem: e?.extendedProperties?.private?.gtdItem || null };
 }
 
-/* Bring every Calendar item across at once (when the mirror is switched on). */
-export async function syncAllItemsToGoogle() {
-  let n = 0;
-  for (const i of state.items) if ((i.status === 'Calendar' && i.date) || i.eventId) { await syncItemToGoogle(i); n++; }
-  return n;
-}
+export const provider = {
+  key: 'google', label: 'Google', connected: googleConnected, calendars: googleCalendars, setCalendars, toggle: toggleCalendar,
+  events: googleEvents, refresh: refreshGoogleEvents, fetchedAt: googleFetchedAt, error: googleError, clear: clearGoogleEvents,
+  listCalendars, body: eventBody, create: createEvent, update: updateEvent, remove: deleteEvent, get: getEvent,
+};

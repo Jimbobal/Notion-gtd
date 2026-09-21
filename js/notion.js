@@ -2,7 +2,7 @@
    every write. All calls go through api/notion/ on this origin, because
    Notion's API sends no CORS headers; the relay forwards and keeps nothing.
 
-   The app owns six databases under one parent page of your choosing:
+   The app owns seven databases under one parent page of your choosing:
      Items       — every "thing": inbox entries, next actions, calendar
                    entries, waiting-fors, someday/maybe, tickler, reference
      Projects    — outcomes needing more than one action
@@ -10,6 +10,7 @@
      Habits      — repeating commitments, and
      Habit Log   — one row per completed check-in
      Perspectives— saved filters
+     Weekly Review — the review checklist, one row per step
    Everything is plain Notion: edit it there and the app follows. */
 'use strict';
 import { state, cfg, saveCfg, saveCache } from './store.js';
@@ -44,7 +45,10 @@ export async function relay(path, opts = {}, token = cfg()?.token) {
 export const DB_TITLES = {
   items: 'GTD · Items', projects: 'GTD · Projects', horizons: 'GTD · Horizons',
   habits: 'GTD · Habits', habitLog: 'GTD · Habit Log', perspectives: 'GTD · Perspectives',
+  review: 'GTD · Weekly Review',
 };
+export const REVIEW_PHASES = ['Get clear', 'Get current', 'Get creative'];
+export const REVIEW_OPENS = ['—', 'Inbox', 'Next Actions', 'Calendar', 'Waiting For', 'Projects', 'Someday/Maybe', 'Tickler', 'Reference', 'Horizons', 'Habits', 'Perspectives', 'Statistics'];
 export const ITEM_STATUSES = ['Inbox','Next','Calendar','Waiting','Someday','Tickler','Reference','Done','Trash'];
 export const PROJECT_STATUSES = ['Active','Someday','Done','Trash'];
 export const HORIZON_LEVELS = ['Area','Goal','Vision','Purpose'];
@@ -113,6 +117,14 @@ const SCHEMA = {
     Filter: { rich_text: {} },
     Order:  { number: { format: 'number' } },
   }),
+  review: () => ({
+    Name:     { title: {} },
+    Phase:    sel(REVIEW_PHASES, ['blue', 'yellow', 'purple']),
+    Order:    { number: { format: 'number' } },
+    Guidance: { rich_text: {} },
+    Opens:    sel(REVIEW_OPENS),
+    Active:   { checkbox: {} },
+  }),
 };
 
 /* What each database must have for the app to work. Extra columns the user
@@ -127,6 +139,7 @@ const REQUIRED = {
   habits:   { Name:'title', Frequency:'select', Target:'number', Status:'select', Notes:'rich_text' },
   habitLog: { Name:'title', Habit:'relation', Date:'date' },
   perspectives: { Name:'title', Filter:'rich_text', Order:'number' },
+  review: { Name:'title', Phase:'select', Order:'number', Guidance:'rich_text', Opens:'select', Active:'checkbox' },
 };
 
 const ADDABLE = new Set(['rich_text', 'files', 'number', 'checkbox', 'date', 'url']);
@@ -193,6 +206,7 @@ export async function createDatabases(parentId, token, onProgress = () => {}) {
   await make('habits');
   await make('habitLog');
   await make('perspectives');
+  await make('review');
   return ids;
 }
 
@@ -209,8 +223,27 @@ export async function adoptDatabases(token) {
 
 /* Check the schema of each database and pull the option lists the app
    needs (contexts, tags). Returns a list of problems, empty when fine. */
-export async function verifyDatabases(ids, token = cfg()?.token) {
+export async function verifyDatabases(ids, token = cfg()?.token, parentId = cfg()?.parentId) {
   const problems = [];
+  /* A database this version added since setup: adopt one with that title
+     if it exists, otherwise create it beside the others. */
+  const missingKeys = Object.keys(REQUIRED).filter(k => !ids[k]);
+  if (missingKeys.length) {
+    let all = [];
+    try { all = await searchDatabases(token); } catch {}
+    for (const key of missingKeys) {
+      const hit = all.find(d => dbTitle(d) === DB_TITLES[key]);
+      if (hit) { ids[key] = bare(hit.id); continue; }
+      let parent = parentId;
+      if (!parent && ids.items) { try { parent = bare((await relay(`databases/${ids.items}`, {}, token)).parent?.page_id); } catch {} }
+      if (!parent) continue;
+      try {
+        const db = await relay('databases', { method:'POST', body:{ parent: { type:'page_id', page_id: parent }, title: text(DB_TITLES[key]), properties: SCHEMA[key](ids) } }, token);
+        ids[key] = bare(db.id);
+      } catch (e) { problems.push(`${DB_TITLES[key]}: could not create — ${e.message}`); }
+    }
+    if (cfg()?.dbs) saveCfg({ dbs: { ...cfg().dbs, ...ids } });
+  }
   for (const [key, req] of Object.entries(REQUIRED)) {
     if (!ids[key]) { problems.push(`${DB_TITLES[key]} is not configured.`); continue; }
     let db;
@@ -278,6 +311,11 @@ export const toLog = pg => ({
   id: bare(pg.id), habitId: getRel(pg, 'Habit'), date: (getDate(pg, 'Date') || '').slice(0, 10),
   edited: pg.last_edited_time,
 });
+export const toStep = pg => ({
+  id: bare(pg.id), name: getTitle(pg), phase: getSel(pg, 'Phase') || 'Get current', order: getNum(pg, 'Order') ?? 0,
+  guidance: getText(pg, 'Guidance'), opens: getSel(pg, 'Opens') || '—', active: P(pg, 'Active') ? getBool(pg, 'Active') : true,
+  edited: pg.last_edited_time, url: pg.url,
+});
 export const toPerspective = pg => {
   let filter = {};
   try { filter = JSON.parse(getText(pg, 'Filter') || '{}'); } catch {}
@@ -322,6 +360,10 @@ const PERSPECTIVE_PROPS = {
   name: v => ({ Name: { title: text(v) } }), filter: v => ({ Filter: RT(JSON.stringify(v || {})) }),
   order: v => ({ Order: NM(v) }),
 };
+const STEP_PROPS = {
+  name: v => ({ Name: { title: text(v) } }), phase: v => ({ Phase: S(v) }), order: v => ({ Order: NM(v) }),
+  guidance: v => ({ Guidance: RT(v) }), opens: v => ({ Opens: S(v || '—') }), active: v => ({ Active: CB(v) }),
+};
 const buildProps = (map, patch) => Object.entries(patch).reduce((acc, [k, v]) =>
   map[k] ? Object.assign(acc, map[k](v)) : acc, {});
 
@@ -341,7 +383,7 @@ async function queryAll(dbId, body = {}, onPage) {
 
 const KINDS = [
   ['items', toItem], ['projects', toProject], ['horizons', toHorizon],
-  ['habits', toHabit], ['habitLog', toLog], ['perspectives', toPerspective],
+  ['habits', toHabit], ['habitLog', toLog], ['perspectives', toPerspective], ['review', toStep],
 ];
 
 /* Full sync replaces everything. Incremental asks each database only for
@@ -356,6 +398,7 @@ export async function sync({ full = false, onProgress = () => {} } = {}) {
   for (const [key, norm] of KINDS) {
     onProgress(`Syncing ${DB_TITLES[key].replace('GTD · ', '').toLowerCase()}…`);
     const body = since ? { filter: { timestamp:'last_edited_time', last_edited_time:{ on_or_after: since } } } : {};
+    if (!c.dbs[key]) { fresh[key] = state[key] || []; continue; }
     fresh[key] = (await queryAll(c.dbs[key], body)).map(norm);
   }
   for (const [key] of KINDS) {
@@ -430,6 +473,16 @@ export const createHabit       = f => createIn('habits', HABIT_PROPS, toHabit, {
 export const updateHabit       = (id, p) => updateIn('habits', HABIT_PROPS, toHabit, id, p);
 export const createPerspective = f => createIn('perspectives', PERSPECTIVE_PROPS, toPerspective, f);
 export const updatePerspective = (id, p) => updateIn('perspectives', PERSPECTIVE_PROPS, toPerspective, id, p);
+export const createStep = f => createIn('review', STEP_PROPS, toStep, { active: true, ...f });
+export const updateStep = (id, p) => updateIn('review', STEP_PROPS, toStep, id, p);
+
+/* First run: fill the review checklist with the standard steps. */
+export async function seedReview(steps) {
+  if (!cfg()?.dbs?.review || cfg().reviewSeeded || state.review.length) return false;
+  for (const [k, s] of steps.entries()) await createStep({ ...s, order: (k + 1) * 10 });
+  saveCfg({ reviewSeeded: true });
+  return true;
+}
 
 export async function logHabit(habit, date) {
   const page = await relay('pages', { method:'POST', body:{

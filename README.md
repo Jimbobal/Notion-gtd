@@ -13,17 +13,17 @@ The FacileThings model, end to end:
 | **Inbox** | Everything captured and not yet decided. `n` or ＋ captures from anywhere. |
 | **Clarify** | The processing questions, one at a time: what is it, is it actionable, one step or a project, under two minutes, am I the right person, when. Every answer files the item; *Clarify all* walks the whole Inbox. |
 | **Next Actions** | Engage: filter by context, energy and time; focus items first; the rest grouped by context. |
-| **Calendar** | The unified calendar: your own dated items (calendar entries, deadlines on next actions, chase-by dates) together with your Google Calendar, day by day, as a rolling week, a month grid and an agenda. Google events can be edited, deleted and created here, and turned into GTD items. |
+| **Calendar** | The unified calendar: your own dated items (calendar entries, deadlines on next actions, chase-by dates) together with your Google and Outlook calendars, day by day, as a rolling week, a month grid and an agenda. Events can be edited, deleted and created here, and turned into GTD items. |
 | **Waiting For** | Grouped by person, with a *Chase* section for anything past its date or older than two weeks. |
 | **Projects** | Stalled projects (no next action) listed first, because that is what GTD exists to catch. A project page shows its outcome, every action by list, and completes with its open actions. |
 | **Someday / Maybe**, **Tickler**, **Reference** | The three parking lists. Tickler items return to the Inbox on their day. |
 | **Horizons** | Areas of responsibility, goals, vision, purpose. Goals hang off areas; projects hang off both. |
 | **Habits** | Daily, weekday, weekly or monthly commitments, with streaks and a fortnight strip. |
-| **Weekly Review** | Guided: get clear, get current, get creative. Each step opens the list it is about and shows what it found (Inbox count, stalled projects, things to chase). |
+| **Weekly Review** | Guided and yours to edit: get clear, get current, get creative. Each step opens the screen it is about and shows what it found there (items to clarify, stalled projects, people to chase, quiet areas). Rename, reorder, regroup, add and remove steps in the app or in Notion. |
 | **Perspectives** | Saved filters across every list, stored in Notion so they follow you between devices. |
 | **Statistics** | System health tiles, completed-per-week, by-context breakdowns, habit rates. |
 | **Trash** | Restore, or empty into Notion's own trash (recoverable there for 30 days). |
-| **Integrations** | One card per service: Notion, Google Calendar & Drive, Dropbox. |
+| **Integrations** | One card per service: Notion, Google Calendar & Drive, Outlook (Microsoft 365), the calendar mirror, Dropbox. |
 | **Settings** | The Notion connection, contexts and tags, theme, week start, review day. |
 
 Items carry a status (which list), a context, tags, project, area, date, time,
@@ -32,7 +32,7 @@ items spawn their next occurrence when completed.
 
 ## Where the data lives
 
-On first run the app creates six databases inside a Notion page you choose:
+On first run the app creates seven databases inside a Notion page you choose:
 
 | Database | Holds |
 |---|---|
@@ -42,6 +42,7 @@ On first run the app creates six databases inside a Notion page you choose:
 | `GTD · Habits` | the habits |
 | `GTD · Habit Log` | one row per check-in |
 | `GTD · Perspectives` | saved filters, as JSON in a text property |
+| `GTD · Weekly Review` | the review checklist: one row per step with its phase, order, guidance and the screen it opens |
 
 They are ordinary Notion databases: edit in Notion and the app follows on the
 next sync; add your own columns and the app ignores them. A column a newer
@@ -55,24 +56,27 @@ incremental query. A cache in localStorage means the app opens instantly and
 keeps working through a flaky connection; writes are optimistic and roll back
 on failure.
 
-## Google Calendar, both ways
+## Google Calendar and Outlook, both ways
 
-Connect Google on the Integrations page (sign-in happens in the browser with
-Google Identity Services; there is no server and no client secret) and:
+Connect Google and/or your Microsoft 365 account on the Integrations page.
+Sign-in happens in the browser (Google Identity Services, MSAL); there is no
+server and no client secret. Then:
 
 - **See and edit.** Events from the calendars you tick appear in the Calendar
-  beside your items, colour-coded. Tap one to change its title, day, times,
-  location or notes, delete it, or make a GTD item from it. A day's
-  *+ Google event* creates one in any calendar you can write to.
-- **Mirror your items.** Switch on *Mirror Calendar items into Google* and
-  pick a calendar: every item on your Calendar list becomes an event there,
+  beside your items, colour-coded per calendar. Tap one to change its title,
+  day, times, location or notes, delete it, or make a GTD item from it. A
+  day's *+ Event* creates one in any calendar you can write to, Google or
+  Outlook.
+- **Mirror your items.** Switch on the calendar mirror and pick one calendar,
+  Google or Outlook: every item on your Calendar list becomes an event there,
   kept in step as the item changes and removed when it leaves the list. The
   event carries a link back to the Notion page. Events that came from Google
-  are updated in place and never deleted by the mirror.
+  or Outlook are updated in place and never deleted by the mirror.
 
-The app asks Google for `calendar.events`, `calendar.calendarlist.readonly`,
-`drive.file` and your email. The token lives in localStorage for its hour and
-is renewed silently while your browser has a Google session.
+Google is asked for `calendar.events`, `calendar.calendarlist.readonly`,
+`drive.file` and your email. Microsoft is asked for `User.Read` and
+`Calendars.ReadWrite`; a work tenant may need an administrator to grant
+consent to the app registration before the first sign-in succeeds.
 
 ## Attachments: Google Drive, Dropbox, any link
 
@@ -92,6 +96,7 @@ subscription links.
 | Service | What | Where |
 |---|---|---|
 | Google | an OAuth client ID (Web application, authorised origin = the app's address) and an API key for the Drive picker; enable the Calendar, Drive and Picker APIs | Google Cloud Console |
+| Microsoft | an app registration (single-page application, redirect URI = the app's address) with delegated `User.Read` and `Calendars.ReadWrite`; its client ID and tenant ID | Microsoft Entra admin centre |
 | Dropbox | an app key, with the app's domain added under Chooser domains | Dropbox App Console |
 
 The Integrations page shows the exact steps and the origin to paste. Both are
@@ -138,8 +143,8 @@ The end-to-end test needs Playwright's Chromium; point `NODE_PATH` at a
 in `test/mock-notion.js` implements enough of Notion — search, database
 create/read/update/query, page create/read/update/archive — for the whole
 setup and every screen to run without a real workspace; `test/google-mock.js`
-stands in for Google sign-in, the Calendar API, the Drive picker and the
-Dropbox chooser inside the browser. Set `NOTION_UPSTREAM` to point the relay
+stands in for Google and Microsoft sign-in, the Calendar and Graph APIs, the
+Drive picker and the Dropbox chooser inside the browser. Set `NOTION_UPSTREAM` to point the relay
 at the mock.
 
 ## Layout
@@ -153,11 +158,12 @@ js/model.js                  the GTD model: lists, projects, habits, review, sta
 js/actions.js                every write, with toasts and rollback
 js/ui.js                     rows, chips, sections, the sheet
 js/views/*.js                one module per screen; the clarify wizard; item sheet
-js/google.js                 Google sign-in and authenticated fetch
-js/gcal.js                   Google Calendar: read, write, mirror items
+js/google.js, js/gcal.js     Google sign-in; Google Calendar read and write
+js/microsoft.js, js/mscal.js Microsoft sign-in; Outlook calendar read and write
+js/calendars.js              both providers behind one interface; the mirror
 js/files.js                  Drive picker, Dropbox chooser, links
-js/sources.js, js/ics.js     calendar sources for the view; .ics export
+js/ics.js                    .ics export
 api/notion/[...path].js      the Notion relay
 dev-server.js                static files + relay, locally
-test/                        mock Notion, Google/Dropbox stubs, relay tests, end-to-end
+test/                        mock Notion, Google/Microsoft/Dropbox stubs, relay tests, end-to-end
 ```

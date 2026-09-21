@@ -6,8 +6,7 @@ import { sync, refreshOptions, NotionError } from './notion.js';
 import { esc, toast, closeSheet, sheetOpen, toggleFold } from './ui.js';
 import { inboxItems, nextItems, waitingItems, stalledProjects, dueTickler, reviewDueIn, activeHabits, habitDue, habitDoneToday } from './model.js';
 import * as A from './actions.js';
-import { refreshAll } from './sources.js';
-import { refreshGoogleEvents } from './gcal.js';
+import { refreshAll, refreshProvider } from './calendars.js';
 import * as attach from './views/attach.js';
 import * as integrations from './views/integrations.js';
 import * as item from './views/item.js';
@@ -127,6 +126,7 @@ async function doSync({ full = false, quiet = false } = {}) {
   try {
     await sync({ full: needFull, onProgress: syncLine });
     if (needFull) await refreshOptions();
+    if (!state.review.length) { try { await A.seedReviewSteps(); } catch {} }
     state.loading = false;
     render();
     let surfaced = 0;
@@ -225,8 +225,9 @@ document.addEventListener('keydown', e => {
 
 document.addEventListener('gtd:render', () => render());
 document.addEventListener('gtd:sync', e => doSync(e.detail || {}));
-document.addEventListener('gtd:google', async () => {
-  try { await refreshGoogleEvents({ force: true }); } catch (e) { toast(`Google Calendar: ${e.message}`, 6000); }
+document.addEventListener('gtd:calendar', async e => {
+  try { if (e.detail?.provider) await refreshProvider(e.detail.provider); else await refreshAll({ force: true }); }
+  catch (err) { toast(`Calendar: ${err.message}`, 6000); }
   render();
 });
 /* A sheet asks to be redrawn after an attachment changed. */

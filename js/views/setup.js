@@ -22,7 +22,7 @@ function draw() {
   let body;
   if (S.step === 1) body = `
     <h3>Connect Notion</h3>
-    <p class="lead">This app keeps everything in six Notion databases it creates for you — items, projects, horizons, habits, a habit log and perspectives. It talks to them through an integration you own.</p>
+    <p class="lead">This app keeps everything in seven Notion databases it creates for you — items, projects, horizons, habits, a habit log, perspectives and the weekly-review checklist. It talks to them through an integration you own.</p>
     <ol class="steps">
       <li>In Notion, open <a href="https://www.notion.so/profile/integrations" target="_blank" rel="noopener">Settings → Connections → Develop or manage integrations</a> and create an <strong>internal</strong> integration. Give it read, update and insert content capabilities.</li>
       <li>Copy its <strong>Internal Integration Secret</strong> and paste it here.</li>
@@ -36,7 +36,7 @@ function draw() {
     </form>`;
   else if (S.step === 2) body = `
     <h3>Where should the databases live?</h3>
-    <p class="lead">Pick a page shared with the integration. The six databases are created inside it. If you set this up before, adopt the existing ones instead.</p>
+    <p class="lead">Pick a page shared with the integration. The seven databases are created inside it. If you set this up before, adopt the existing ones instead.</p>
     ${S.problems.length ? `<div class="panel warn"><strong>The configured databases need attention</strong>${S.problems.map(esc).join('<br>')}</div>` : ''}
     ${S.pages === null ? '<div class="spinner"></div>' : S.pages.length ? `
       <form id="setup-parent">
@@ -48,7 +48,7 @@ function draw() {
       <button class="btn" data-act="setup-adopt" ${S.busy ? 'disabled' : ''}>Adopt existing databases</button>
       <button class="btn" data-act="setup-back">Change token</button>
     </div>
-    ${S.adoptable ? `<div class="panel ${S.adoptable.missing.length ? 'warn' : 'good'}" style="margin-top:12px"><strong>${S.adoptable.missing.length ? 'Not all databases were found' : 'Found all six'}</strong>${
+    ${S.adoptable ? `<div class="panel ${S.adoptable.missing.length ? 'warn' : 'good'}" style="margin-top:12px"><strong>${S.adoptable.missing.length ? 'Not all databases were found' : 'Found them all'}</strong>${
       S.adoptable.missing.length ? `Missing: ${S.adoptable.missing.map(esc).join(', ')}. Share them with the integration, or create a fresh set above.` : 'Adopting them now…'}</div>` : ''}
     ${S.err ? `<p class="err">${esc(S.err)}</p>` : ''}`;
   else body = `
@@ -72,7 +72,7 @@ async function loadPages() {
 
 async function finish(ids, parent) {
   S.step = 3; S.busy = 'Checking the databases…'; S.err = ''; draw();
-  const problems = await verifyDatabases(ids, S.token);
+  const problems = await verifyDatabases(ids, S.token, parent?.parentId || null);
   if (problems.length) { S.err = problems.join(' '); S.busy = ''; draw(); return; }
   saveCfg({ dbs: ids, ...(parent || {}) });
   S.busy = 'Ready.'; draw();

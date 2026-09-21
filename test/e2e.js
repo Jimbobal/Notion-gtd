@@ -49,7 +49,7 @@ const addDays = (s, n) => { const [y, m, d] = s.split('-').map(Number); const dt
   await page.waitForFunction(() => /synced/.test(document.querySelector('#sync-line')?.textContent || ''));
   let st = await mockState();
   const titles = Object.values(st.dbs).map(d => d.title[0].text.content).sort();
-  assert.deepEqual(titles, ['GTD · Habit Log','GTD · Habits','GTD · Horizons','GTD · Items','GTD · Perspectives','GTD · Projects']);
+  assert.deepEqual(titles, ['GTD · Habit Log','GTD · Habits','GTD · Horizons','GTD · Items','GTD · Perspectives','GTD · Projects','GTD · Weekly Review']);
   const hz = Object.values(st.dbs).find(d => d.title[0].text.content === 'GTD · Horizons');
   assert.equal(hz.properties.Parent.type, 'relation', 'self-relation added after creation');
   const itemsDb = Object.values(st.dbs).find(d => d.title[0].text.content === 'GTD · Items');
@@ -57,7 +57,7 @@ const addDays = (s, n) => { const [y, m, d] = s.split('-').map(Number); const dt
   assert.match(await textOf('#view'), /Inbox zero/);
   const cfg = await page.evaluate(() => JSON.parse(localStorage.getItem('gtd.cfg')));
   assert.equal(cfg.parentTitle, 'GTD Home');
-  assert.equal(Object.keys(cfg.dbs).length, 6);
+  assert.equal(Object.keys(cfg.dbs).length, 7);
 
   /* ── 2. Capture ───────────────────────────────────────────── */
   const capture = async (name, notes = '') => {
@@ -312,6 +312,48 @@ const addDays = (s, n) => { const [y, m, d] = s.split('-').map(Number); const dt
   await toastIs(/review complete/);
   assert.match(await textOf('#view'), /Last review Today/);
 
+  /* ── 10b. The review checklist is editable ────────────────── */
+  st = await mockState();
+  const reviewDb = Object.values(st.dbs).find(d => d.title[0].text.content === 'GTD · Weekly Review');
+  const stepRows = () => Object.values(st.pages).filter(p => p.parent.database_id === reviewDb.id);
+  assert.equal(stepRows().length, 10, 'the standard steps were seeded into Notion');
+  assert.match(await textOf('#view'), /Inbox is at zero|item(s)? to clarify/);
+  await page.click('[data-act=rev-edit]');
+  await page.waitForSelector('.review-step.edit');
+  const first = await page.$('.review-step.edit input[data-f=name]');
+  await first.fill('Gather everything');
+  await first.dispatchEvent('change');
+  await toastIs(/Saved/);
+  await page.click('[data-act=rev-add][data-v="Get creative"]');
+  await toastIs(/Step added/);
+  await page.waitForFunction(() => document.querySelectorAll('.review-step.edit').length === 11);
+  const added = page.locator('.review-step.edit').last().locator('input[data-f=name]');
+  await added.fill('Plan the big rocks');
+  await added.dispatchEvent('change');
+  await toastIs(/Saved/);
+  const guidance = page.locator('.review-step.edit').last().locator('textarea[data-f=guidance]');
+  await guidance.fill('Pick the three things that must happen next week.');
+  await guidance.dispatchEvent('change');
+  await toastIs(/Saved/);
+  /* move the second step up, remove the third */
+  const names = () => page.$$eval('.review-step.edit input[data-f=name]', els => els.map(e => e.value));
+  const before = await names();
+  await page.locator('.review-step.edit').nth(1).locator('[data-act=rev-move][data-v="-1"]').click();
+  await page.waitForFunction(b => document.querySelector('.review-step.edit input[data-f=name]')?.value === b[1], before);
+  const after = await names();
+  assert.equal(after[0], before[1]); assert.equal(after[1], before[0]);
+  await page.locator('.review-step.edit').nth(2).locator('[data-act=rev-remove]').click();
+  await toastIs(/Saved/);
+  await page.waitForFunction(() => document.querySelectorAll('.review-step.edit').length === 10);
+  await page.click('[data-act=rev-edit-done]');
+  await page.waitForSelector('.review-step:not(.edit)');
+  const shown = await textOf('#view');
+  assert.match(shown, /Gather everything/); assert.match(shown, /Plan the big rocks/); assert.match(shown, /Pick the three things/);
+  st = await mockState();
+  assert.equal(stepRows().filter(p => p.properties.Active.checkbox).length, 10);
+  assert.ok(stepRows().some(p => p.properties.Name.title[0].plain_text === 'Plan the big rocks' && p.properties.Phase.select.name === 'Get creative'));
+  await page.screenshot({ path: `${SHOTS}/19-review-editable.png`, fullPage: true });
+
   /* ── 11. Perspectives ─────────────────────────────────────── */
   await go('#/perspectives');
   await page.click('[data-act=persp-new]');
@@ -373,24 +415,24 @@ const addDays = (s, n) => { const [y, m, d] = s.split('-').map(Number); const dt
   await page.fill('#google-form input[name=clientId]', 'client-123');
   await page.fill('#google-form input[name=apiKey]', 'AIzaTest');
   await page.click('#google-form button[type=submit]');
-  await page.waitForSelector('[data-act=g-connect]');
-  await page.click('[data-act=g-connect]');
+  await page.waitForSelector('[data-act=p-connect][data-provider=google]');
+  await page.click('[data-act=p-connect][data-provider=google]');
   await toastIs(/Google connected/);
   await page.waitForFunction(() => /james@example\.com/.test(document.querySelector('#svc-google')?.textContent || ''));
   const gtext = await textOf('#svc-google');
   assert.match(gtext, /James/); assert.match(gtext, /Holidays/); assert.match(gtext, /read only/);
   assert.equal(await page.evaluate(() => window.__gisPrompt), 'consent', 'first sign-in asks for consent');
   /* mirror items into the primary calendar */
-  await page.selectOption('select[data-act-change=g-write]', 'james@example.com');
-  await page.waitForSelector('input[data-act-change=g-sync]:not([disabled])');
-  await page.check('input[data-act-change=g-sync]');
+  await page.selectOption('select[data-act-change=mirror-target]', 'google|james@example.com');
+  await page.waitForSelector('input[data-act-change=mirror-on]:not([disabled])');
+  await page.check('input[data-act-change=mirror-on]');
   await toastIs(/mirrored/);
   const mirrored = G.events['james@example.com'].find(e => e.summary === 'Dentist appointment');
   assert.ok(mirrored, 'the Calendar item was mirrored to Google');
   assert.ok(mirrored.start.dateTime && /T09:30/.test(mirrored.start.dateTime), 'with its time');
   st = await mockState();
   const dentistAppt = Object.values(st.pages).find(p => p.properties.Name?.title[0].plain_text === 'Dentist appointment');
-  assert.equal(dentistAppt.properties['Event ID'].rich_text[0].plain_text, `james@example.com/${mirrored.id}`);
+  assert.equal(dentistAppt.properties['Event ID'].rich_text[0].plain_text, `google|james@example.com|${mirrored.id}`);
   assert.equal(mirrored.extendedProperties.private.gtdItem, dentistAppt.id.replace(/-/g, ''));
   /* dropbox */
   await page.fill('#dropbox-form input[name=appKey]', 'dbx-key');
@@ -414,12 +456,13 @@ const addDays = (s, n) => { const [y, m, d] = s.split('-').map(Number); const dt
   assert.equal(G.events['james@example.com'].find(e => e.id === 'ev_standup').summary, 'Standup (moved)');
   await page.waitForFunction(() => /Standup \(moved\)/.test(document.querySelector('#view')?.textContent || ''));
   /* create a Google event */
-  await page.click('[data-act=cal-add-google]');
+  await page.click('[data-act=cal-add-event]');
   await page.waitForSelector('#gevent-form');
   await page.fill('#gevent-form input[name=title]', 'Lunch with Sam');
   await page.uncheck('#gevent-form input[name=allDay]');
   await page.fill('#gevent-form input[name=time]', '12:30');
   await page.fill('#gevent-form input[name=endTime]', '13:15');
+  await page.selectOption('#gevent-form select[name=target]', 'google|james@example.com');
   await page.click('#gevent-form button[type=submit]');
   await toastIs(/Event created/);
   const lunch = G.events['james@example.com'].find(e => e.summary === 'Lunch with Sam');
@@ -438,7 +481,7 @@ const addDays = (s, n) => { const [y, m, d] = s.split('-').map(Number); const dt
   await toastIs(/Added to Calendar/);
   st = await mockState();
   const hol = Object.values(st.pages).find(p => p.properties.Name?.title[0].plain_text === 'Bank holiday');
-  assert.equal(hol.properties['Event ID'].rich_text[0].plain_text, 'holidays@group.v.calendar.google.com/ev_hol');
+  assert.equal(hol.properties['Event ID'].rich_text[0].plain_text, 'google|holidays@group.v.calendar.google.com|ev_hol');
   assert.ok(G.events['holidays@group.v.calendar.google.com'].some(e => e.id === 'ev_hol'), 'read-only event untouched');
   /* delete a Google event from the app */
   await page.click('.event:has-text("Lunch with Sam")');
@@ -457,6 +500,79 @@ const addDays = (s, n) => { const [y, m, d] = s.split('-').map(Number); const dt
   st = await mockState();
   assert.equal(Object.values(st.pages).find(p => p.properties.Name?.title[0].plain_text === 'Dentist appointment').properties['Event ID'].rich_text.length, 0);
   await page.click('[data-act=cal-clear]');
+
+  /* ── 14f. Outlook (Microsoft 365) calendar, both ways ─────── */
+  await go('#/integrations');
+  await page.waitForSelector('#microsoft-form');
+  await page.fill('#microsoft-form input[name=clientId]', 'ms-app');
+  await page.fill('#microsoft-form input[name=tenant]', 'tenant-1');
+  await page.click('#microsoft-form button[type=submit]');
+  await page.waitForSelector('[data-act=p-connect][data-provider=outlook]');
+  await page.click('[data-act=p-connect][data-provider=outlook]');
+  await toastIs(/Outlook connected/);
+  await page.waitForFunction(() => /james@gleeds\.example/.test(document.querySelector('#svc-microsoft')?.textContent || ''));
+  const login = await page.evaluate(() => window.__msLogin);
+  assert.equal(login.authority, 'https://login.microsoftonline.com/tenant-1');
+  assert.deepEqual(login.scopes, ['User.Read', 'Calendars.ReadWrite']);
+  assert.equal(login.redirect, 'http://localhost:4180/');
+  const mtext = await textOf('#svc-microsoft');
+  assert.match(mtext, /Calendar/); assert.match(mtext, /Team/); assert.match(mtext, /read only/);
+  assert.ok(G.ms.log.some(l => /calendarView/.test(l.path) && /outlook\.timezone/.test(l.prefer || '')), 'events asked for in the local zone');
+  /* switch the mirror to the Outlook work calendar */
+  await page.selectOption('select[data-act-change=mirror-target]', 'outlook|cal-work');
+  await page.waitForFunction(() => document.querySelector('input[data-act-change=mirror-on]')?.checked);
+  await go('#/calendar');
+  await page.waitForFunction(() => /Project board \(Outlook\)/.test(document.querySelector('#view')?.textContent || ''));
+  assert.match(await textOf('.feed-legend'), /Team/);
+  /* a new Calendar item now lands in Outlook */
+  await page.click(`[data-act=cal-day][data-v="${addDays(todayISO(), 2)}"]`);
+  await page.click('[data-act=cal-add]');
+  await page.waitForSelector('#item-form');
+  await page.fill('#item-form input[name=name]', 'Site visit');
+  await page.fill('#item-form input[name=time]', '10:00');
+  await page.click('#item-form button[type=submit]');
+  await toastIs(/Added to Calendar/);
+  await page.waitForFunction(() => /Site visit/.test(document.querySelector('#view')?.textContent || ''));
+  await page.waitForTimeout(300);
+  const site = G.ms.events['cal-work'].find(e => e.subject === 'Site visit');
+  assert.ok(site && /T10:00:00$/.test(site.start.dateTime) && site.isAllDay === false, 'mirrored into Outlook with its time');
+  assert.equal(site.singleValueExtendedProperties[0].value, (await mockState()) && Object.values((await mockState()).pages).find(p => p.properties.Name?.title[0].plain_text === 'Site visit').id.replace(/-/g, ''));
+  st = await mockState();
+  assert.equal(Object.values(st.pages).find(p => p.properties.Name?.title[0].plain_text === 'Site visit').properties['Event ID'].rich_text[0].plain_text, `outlook|cal-work|${site.id}`);
+  await page.click('[data-act=cal-clear]');
+  /* edit an Outlook event */
+  await page.click('.event:has-text("Project board (Outlook)")');
+  await page.waitForSelector('#gevent-form');
+  await page.fill('#gevent-form input[name=title]', 'Project board (moved)');
+  await page.click('#gevent-form button[type=submit]');
+  await toastIs(/Event saved/);
+  assert.equal(G.ms.events['cal-work'].find(e => e.id === 'oev_board').subject, 'Project board (moved)');
+  /* create one in Outlook from the app */
+  await page.click('[data-act=cal-add-event]');
+  await page.waitForSelector('#gevent-form');
+  await page.fill('#gevent-form input[name=title]', 'Client call');
+  await page.uncheck('#gevent-form input[name=allDay]');
+  await page.fill('#gevent-form input[name=time]', '11:00');
+  await page.selectOption('#gevent-form select[name=target]', 'outlook|cal-work');
+  await page.click('#gevent-form button[type=submit]');
+  await toastIs(/Event created in Outlook/);
+  assert.ok(G.ms.events['cal-work'].some(e => e.subject === 'Client call'));
+  await page.waitForFunction(() => /Client call/.test(document.querySelector('#view')?.textContent || ''));
+  /* a read-only Outlook event becomes an item, and is left alone */
+  await page.click('.event:has-text("Team offsite")');
+  await page.waitForSelector('[data-act=ev-to-item]');
+  await page.click('[data-act=ev-to-item]');
+  await toastIs(/Added to Calendar/);
+  st = await mockState();
+  assert.equal(Object.values(st.pages).find(p => p.properties.Name?.title[0].plain_text === 'Team offsite').properties['Event ID'].rich_text[0].plain_text, 'outlook|cal-team|oev_offsite');
+  assert.ok(G.ms.events['cal-team'].some(e => e.id === 'oev_offsite'));
+  /* delete the created one */
+  await page.click('.event:has-text("Client call")');
+  await page.waitForSelector('[data-act=ev-delete]');
+  await page.click('[data-act=ev-delete]');
+  await toastIs(/Event deleted/);
+  assert.ok(!G.ms.events['cal-work'].some(e => e.subject === 'Client call'));
+  await page.screenshot({ path: `${SHOTS}/18-calendar-outlook.png`, fullPage: true });
 
   /* ── 14e. Attachments: Drive, Dropbox, a Notion link ──────── */
   await go('#/waiting');
@@ -534,12 +650,15 @@ const addDays = (s, n) => { const [y, m, d] = s.split('-').map(Number); const dt
 
   /* Disconnect Google: calendars drop out of the legend */
   await go('#/integrations');
-  await page.click('[data-act=g-disconnect]');
+  await page.click('[data-act=p-disconnect][data-provider=google]');
   await toastIs(/Google disconnected/);
   assert.equal(await page.evaluate(() => window.__revoked), 'tok_client-123', 'token revoked');
+  await page.click('[data-act=p-disconnect][data-provider=outlook]');
+  await toastIs(/Outlook disconnected/);
+  assert.equal(await page.evaluate(() => window.__msLoggedOut), true);
   await go('#/calendar');
   await page.waitForFunction(() => !/Standup \(moved\)/.test(document.querySelector('#view')?.textContent || ''));
-  assert.ok(!(await page.$('.feed-legend')), 'no calendar legend once Google is disconnected');
+  assert.ok(!(await page.$('.feed-legend')), 'no calendar legend once both are disconnected');
 
   /* ── 18. Adopt on a second device ─────────────────────────── */
   const ctx2 = await browser.newContext({ viewport: { width: 390, height: 844 } });
@@ -555,7 +674,7 @@ const addDays = (s, n) => { const [y, m, d] = s.split('-').map(Number); const dt
   await p2.evaluate(() => { location.hash = '#/projects'; });
   await p2.waitForFunction(() => /Learn the cello/.test(document.querySelector('#view')?.textContent || ''));
   const dbCount = Object.keys((await mockState()).dbs).length;
-  assert.equal(dbCount, 6, 'adopting created no new databases');
+  assert.equal(dbCount, 7, 'adopting created no new databases');
 
   console.log('console errors:', JSON.stringify(errors));
   assert.deepEqual(errors, []);

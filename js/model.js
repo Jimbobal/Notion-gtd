@@ -4,6 +4,8 @@
 'use strict';
 import { state, prefs, store, LS } from './store.js';
 
+const plural = (n, s, p = s + 's') => `${n} ${n === 1 ? s : p}`;
+
 /* ═══ DATES ═════════════════════════════════════════════════════ */
 const pad2 = n => String(n).padStart(2, '0');
 export const isoDay = (d = new Date()) => `${d.getFullYear()}-${pad2(d.getMonth()+1)}-${pad2(d.getDate())}`;
@@ -226,29 +228,62 @@ export function habitRate(h, days = 30) {
   return Math.min(100, Math.round(logs / (periods * (h.target || 1)) * 100));
 }
 
-/* ═══ WEEKLY REVIEW ═════════════════════════════════════════════ */
-export const REVIEW_STEPS = [
-  { phase:'Get clear', key:'collect', title:'Collect loose ends',
-    text:'Papers, receipts, notes, photos, the thing you keep meaning to write down. Capture each one into the Inbox.' },
-  { phase:'Get clear', key:'inbox', title:'Empty the Inbox', route:'inbox',
-    text:'Clarify every item to zero. Decide what it is, what the next action is, and where it goes.' },
-  { phase:'Get clear', key:'head', title:'Empty your head',
-    text:'Anything nagging? New projects, ideas, commitments made this week? Capture them now.' },
-  { phase:'Get current', key:'next', title:'Review Next Actions', route:'next',
-    text:'Mark off what is done. Trash what no longer matters. Fix anything filed under the wrong context.' },
-  { phase:'Get current', key:'calendar', title:'Review the calendar', route:'calendar',
-    text:'Last week: any follow-ups owed? Coming weeks: anything to prepare for?' },
-  { phase:'Get current', key:'waiting', title:'Review Waiting For', route:'waiting',
-    text:'Anything overdue for a chase? Anything that has arrived and can be closed?' },
-  { phase:'Get current', key:'projects', title:'Review every project', route:'projects',
-    text:'Each active project needs at least one next action. Stalled ones are listed first.' },
-  { phase:'Get current', key:'someday', title:'Review Someday/Maybe', route:'someday',
-    text:'Anything ready to become active? Anything you can now let go of?' },
-  { phase:'Get creative', key:'horizons', title:'Look up: areas and goals', route:'horizons',
-    text:'Is every area of responsibility getting attention? Do the goals still point where you want to go?' },
-  { phase:'Get creative', key:'ideas', title:'Be creative',
-    text:'What bold, new or improving ideas could you add to the system? Capture a few, even the daft ones.' },
+/* ═══ WEEKLY REVIEW ═════════════════════════════════════════════
+   The checklist is data (state.review, from the Weekly Review database).
+   Until it is seeded, the standard steps stand in. */
+export const DEFAULT_REVIEW_STEPS = [
+  { phase:'Get clear', name:'Collect loose ends', opens:'—',
+    guidance:'Papers, receipts, notes, photos, the thing you keep meaning to write down. Capture each one into the Inbox.' },
+  { phase:'Get clear', name:'Empty the Inbox', opens:'Inbox',
+    guidance:'Clarify every item to zero. Decide what it is, what the next action is, and where it goes.' },
+  { phase:'Get clear', name:'Empty your head', opens:'—',
+    guidance:'Anything nagging? New projects, ideas, commitments made this week? Capture them now.' },
+  { phase:'Get current', name:'Review Next Actions', opens:'Next Actions',
+    guidance:'Mark off what is done. Trash what no longer matters. Fix anything filed under the wrong context.' },
+  { phase:'Get current', name:'Review the calendar', opens:'Calendar',
+    guidance:'Last week: any follow-ups owed? Coming weeks: anything to prepare for?' },
+  { phase:'Get current', name:'Review Waiting For', opens:'Waiting For',
+    guidance:'Anything overdue for a chase? Anything that has arrived and can be closed?' },
+  { phase:'Get current', name:'Review every project', opens:'Projects',
+    guidance:'Each active project needs at least one next action. Stalled ones are listed first.' },
+  { phase:'Get current', name:'Review Someday/Maybe', opens:'Someday/Maybe',
+    guidance:'Anything ready to become active? Anything you can now let go of?' },
+  { phase:'Get creative', name:'Look up: areas and goals', opens:'Horizons',
+    guidance:'Is every area of responsibility getting attention? Do the goals still point where you want to go?' },
+  { phase:'Get creative', name:'Be creative', opens:'—',
+    guidance:'What bold, new or improving ideas could you add to the system? Capture a few, even the daft ones.' },
 ];
+export const OPENS_ROUTE = { 'Inbox':'inbox', 'Next Actions':'next', 'Calendar':'calendar', 'Waiting For':'waiting', 'Projects':'projects',
+  'Someday/Maybe':'someday', 'Tickler':'tickler', 'Reference':'reference', 'Horizons':'horizons', 'Habits':'habits', 'Perspectives':'perspectives', 'Statistics':'stats' };
+
+export function reviewSteps() {
+  const live = state.review.filter(s => s.active).sort((a, b) => (a.order - b.order) || a.name.localeCompare(b.name));
+  if (live.length) return live;
+  return DEFAULT_REVIEW_STEPS.map((s, k) => ({ ...s, id: `d${k}`, order: (k + 1) * 10, active: true, virtual: true }));
+}
+
+/* What each step finds right now, so the review is a look at real
+   state rather than a list of good intentions. */
+export function reviewFindings(step) {
+  switch (step.opens) {
+    case 'Inbox': { const a = inboxItems(); return { ok: !a.length, text: a.length ? `${plural(a.length, 'item')} to clarify` : 'Inbox is at zero ✓', items: a }; }
+    case 'Next Actions': { const a = nextItems(); const over = a.filter(isOverdue); const stale = a.filter(i => ageDays(i.edited) > 30);
+      return { ok: !over.length, text: `${plural(a.length, 'next action')} · ${over.length} overdue · ${stale.length} untouched for a month`, items: [...over, ...stale.filter(i => !over.includes(i))] }; }
+    case 'Calendar': { const over = datedItems().filter(isOverdue); const tick = dueTickler();
+      return { ok: !over.length && !tick.length, text: over.length || tick.length ? `${over.length} overdue · ${tick.length} tickler due back` : 'Nothing overdue ✓', items: [...over, ...tick] }; }
+    case 'Waiting For': { const a = waitingItems().filter(i => isOverdue(i) || ageDays(i.created) >= 14);
+      return { ok: !a.length, text: a.length ? `${a.length} to chase` : 'Nothing overdue ✓', items: a }; }
+    case 'Projects': { const p = stalledProjects(); return { ok: !p.length, text: p.length ? `${plural(p.length, 'project')} without a next action` : 'Every project has a next action ✓', projects: p }; }
+    case 'Someday/Maybe': { const a = somedayItems(); return { ok: true, text: `${a.length} ideas parked · ${somedayProjects().length} projects on hold` }; }
+    case 'Tickler': { const a = ticklerItems(); return { ok: true, text: `${a.length} waiting to resurface` }; }
+    case 'Horizons': { const quiet = horizonsAt('Area').filter(h => !projectsUnder(h).length);
+      return { ok: !quiet.length, text: quiet.length ? `${plural(quiet.length, 'area')} with no active project` : 'Every area has a live project ✓', names: quiet.map(h => h.name) }; }
+    case 'Habits': { const weak = activeHabits().map(h => ({ h, r: habitRate(h) })).filter(x => x.r !== null && x.r < 50);
+      return { ok: !weak.length, text: weak.length ? `${plural(weak.length, 'habit')} under 50% this month` : 'Habits on track ✓', names: weak.map(x => `${x.h.name} · ${x.r}%`) }; }
+    default: return null;
+  }
+}
+
 export const reviewState = () => store.get(LS.review, { done: {}, startedAt: null, lastCompleted: null, history: [] });
 export const saveReview = r => store.set(LS.review, r);
 export function reviewDueIn() {

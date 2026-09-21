@@ -6,7 +6,7 @@ import { state } from './store.js';
 import * as N from './notion.js';
 import { toast, closeSheet } from './ui.js';
 import { today, nextOccurrence, projectItems, STATUS_LABEL, hasTime } from './model.js';
-import { syncItemToGoogle, deleteEvent } from './gcal.js';
+import { syncItemMirror, dropMirror } from './calendars.js';
 
 export const rerender = () => document.dispatchEvent(new CustomEvent('gtd:render'));
 
@@ -21,8 +21,8 @@ export const itemById = id => state.items.find(i => i.id === id);
    the change itself; a failure is reported and the next write retries. */
 async function mirror(id) {
   const i = itemById(id); if (!i) return;
-  try { await syncItemToGoogle(i); }
-  catch (e) { toast(`Google Calendar: ${e.message}`, 6000); }
+  try { await syncItemMirror(i); }
+  catch (e) { toast(`Calendar mirror: ${e.message}`, 6000); }
 }
 
 /* Complete. A repeating item spawns its next occurrence and this one is
@@ -95,18 +95,26 @@ export const addPerspective  = f => guard(() => N.createPerspective(f), 'Perspec
 export const savePerspective = (id, p) => guard(() => N.updatePerspective(id, p), 'Saved');
 export const deletePerspective = id => guard(() => N.archivePage('perspectives', id), 'Perspective removed');
 
+/* Weekly review checklist */
+export const addStep  = (f, quiet) => guard(() => N.createStep(f), quiet ? null : 'Step added');
+export const saveStep = (id, p, quiet) => guard(() => N.updateStep(id, p), quiet ? null : 'Saved');
+export async function seedReviewSteps() {
+  const { DEFAULT_REVIEW_STEPS } = await import('./model.js');
+  await N.seedReview(DEFAULT_REVIEW_STEPS);
+  rerender();
+}
+
 /* Trash */
 export async function emptyTrash() {
   const its = state.items.filter(i => i.status === 'Trash');
   const prs = state.projects.filter(p => p.status === 'Trash');
   await guard(async () => {
-    for (const i of its) { if (i.eventId) { const [c, e] = i.eventId.split('/'); try { await deleteEvent(c, e); } catch {} } await N.archivePage('items', i.id); }
+    for (const i of its) { await dropMirror(i); await N.archivePage('items', i.id); }
     for (const p of prs) await N.archivePage('projects', p.id);
   }, `Trash emptied — ${its.length + prs.length} sent to Notion's trash`);
 }
 export const deleteForever = async (key, id) => {
-  const i = key === 'items' ? itemById(id) : null;
-  if (i?.eventId) { const [c, e] = i.eventId.split('/'); try { await deleteEvent(c, e); } catch {} }
+  if (key === 'items') await dropMirror(itemById(id));
   return guard(() => N.archivePage(key, id), 'Deleted (recoverable in Notion for 30 days)');
 };
 

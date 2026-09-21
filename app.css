@@ -391,6 +391,16 @@ a.pill{text-decoration:none;color:var(--text-2)}
 .progress-bar{height:6px;border-radius:3px;background:var(--bg-sunken);overflow:hidden;margin:6px 0 14px}
 .progress-bar>span{display:block;height:100%;background:var(--green);border-radius:3px}
 
+.findings{margin:6px 0 4px;padding:10px 12px;border-radius:10px;background:var(--bg-sunken);font-size:12.5px;line-height:1.5}
+.findings b{display:block;color:var(--amber);margin-bottom:4px;font-weight:600}
+.findings.ok b{color:var(--green)}
+.findings .item{margin:6px 0 0;padding:8px 10px}
+.findings .list-inline{margin-top:4px}
+.review-step.edit{border-style:dashed}
+.review-step.edit .field{margin-bottom:8px}
+.review-step.is-current h4{color:var(--accent)}
+.svc-logo.microsoft{background:#fff;color:#0078d4;border:1px solid var(--border);font-family:Arial,sans-serif}
+
 /* ── charts ─────────────────────────────────────────── */
 .chart{width:100%;height:auto;display:block;margin:4px 0 8px}
 .chart text{font-size:10px;fill:var(--text-3);font-family:inherit}
