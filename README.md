@@ -106,7 +106,7 @@ public identifiers, stored on the device with the rest of the config.
 ## The relay
 
 Notion's API sends no CORS headers, so a browser cannot call it. The one piece
-of server here is `api/notion/[...path].js`, a Vercel function that forwards a
+of server here is `api/notion/relay.js`, a Vercel function that forwards a
 request to `api.notion.com` and the reply back, byte for byte. It holds no
 token, no database and no log: the token arrives in the caller's
 `Authorization` header and goes straight through. It forwards only the
@@ -133,7 +133,7 @@ deletes it and the cache; nothing in Notion changes.
 ## Deploy
 
 Push to a Vercel project with no framework preset. The static files are served
-as they are and `api/notion/[...path].js` becomes the relay function. No
+as they are and `api/notion/relay.js` becomes the relay function. No
 environment variables are needed.
 
 ## Development
@@ -168,7 +168,8 @@ js/microsoft.js, js/mscal.js Microsoft sign-in; Outlook calendar read and write
 js/calendars.js              both providers behind one interface; the mirror
 js/files.js                  Drive picker, Dropbox chooser, links
 js/ics.js                    .ics export
-api/notion/[...path].js      the Notion relay
+api/notion/relay.js          the Notion relay
+vercel.json                  rewrites /api/notion/* to the relay
 dev-server.js                static files + relay, locally
 test/                        mock Notion, Google/Microsoft/Dropbox stubs, relay tests, end-to-end
 ```

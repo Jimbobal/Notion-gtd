@@ -8,7 +8,7 @@ const mock = require('./mock-notion.js');
 (async () => {
   const { log } = await mock.start(4998);
   process.env.NOTION_UPSTREAM = 'http://127.0.0.1:4998/v1';
-  const relay = require('../api/notion/[...path].js');
+  const relay = require('../api/notion/relay.js');
   const srv = http.createServer(relay);
   await new Promise(r => srv.listen(4997, r));
   const R = 'http://127.0.0.1:4997/api/notion';
@@ -44,6 +44,13 @@ const mock = require('./mock-notion.js');
   assert.equal(page.properties.Name.title[0].plain_text, 'hi');
   r = await fetch(`${R}/pages/${page.id}`, { method: 'PATCH', headers: auth, body: JSON.stringify({ archived: true }) });
   assert.equal((await r.json()).archived, true);
+
+  /* Vercel's rewrite form: the Notion path arrives as ?path= on /relay. */
+  r = await fetch(`${R}/relay?path=users/me`, { headers: auth });
+  assert.equal(r.status, 200, 'rewritten form works');
+  assert.equal(log.at(-1).path, '/v1/users/me', 'path taken from ?path= and not forwarded');
+  r = await fetch(`${R}/relay?path=blocks/abc`, { headers: auth });
+  assert.equal(r.status, 404, 'allowlist applies to the rewritten form');
 
   r = await fetch(`${R}/users/me`, { headers: { Authorization: 'Bearer wrong' } });
   assert.equal(r.status, 401, 'upstream status passes through');

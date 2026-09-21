@@ -11,7 +11,7 @@ const http = require('http');
 const fs   = require('fs');
 const path = require('path');
 
-const relay = require('./api/notion/[...path].js');
+const relay = require('./api/notion/relay.js');
 const ROOT  = __dirname;
 const PORT  = Number(process.env.PORT || 4180);
 

@@ -10,8 +10,10 @@
  *   /api/notion/users/me            →  https://api.notion.com/v1/users/me
  *   /api/notion/databases/:id/query →  …/v1/databases/:id/query
  *
- * Deployed by Vercel as a Node function (this file's [...path] name is its
- * catch-all route). dev-server.js mounts the same handler locally, so what
+ * Deployed by Vercel as a Node function. vercel.json rewrites every
+ * /api/notion/<anything> request to it with the remainder in ?path=, because
+ * Vercel's own file-name routing only matches a single path segment.
+ * dev-server.js mounts the same handler locally on the raw path, so what
  * runs on a laptop is what runs in production.
  */
 'use strict';
@@ -54,7 +56,13 @@ const reply = (res, status, body) => {
 
 module.exports = async function handler(req, res) {
   const url   = new URL(req.url, 'http://lens.local');
-  const path  = url.pathname.replace(/^\/api\/notion\/?/, '').replace(/\/+$/, '');
+  /* Vercel's rewrite hands the Notion path over as ?path=…; the dev server
+     leaves it in the URL. Take whichever is there, and never forward the
+     ?path= parameter itself to Notion. */
+  let path = url.pathname.replace(/^\/api\/notion\/?/, '');
+  if (!path || path === 'relay') path = url.searchParams.get('path') || '';
+  url.searchParams.delete('path');
+  path = path.replace(/^\/+/, '').replace(/\/+$/, '');
   const method = (req.method || 'GET').toUpperCase();
 
   if (!ALLOW.some(([m, p]) => m.test(method) && p.test(path))) {
