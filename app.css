@@ -334,6 +334,39 @@ h1,h2,h3,h4{letter-spacing:-.02em}
 .pill.feed.is-on{background:var(--card);color:var(--text);border-color:var(--fc,var(--border))}
 a.pill{text-decoration:none;color:var(--text-2)}
 
+/* attachments */
+.attach-list{display:flex;flex-wrap:wrap;gap:6px;margin-bottom:8px}
+.attach{display:inline-flex;align-items:center;gap:4px;max-width:100%;padding:5px 6px 5px 9px;border-radius:9px;
+  background:var(--card);border:1px solid var(--border);font-size:12.5px}
+.attach a{color:var(--text);text-decoration:none;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:220px}
+.attach a i{font-style:normal;color:var(--accent);margin-right:5px;font-size:11px}
+.attach button{color:var(--text-3);font-size:15px;line-height:1;padding:0 4px}
+
+/* integrations cards */
+.svc{background:var(--card);border:1px solid var(--border);border-radius:var(--radius);margin-bottom:12px;overflow:hidden}
+.svc-head{display:flex;gap:12px;align-items:flex-start;padding:14px}
+.svc-logo{flex:none;width:40px;height:40px;border-radius:11px;display:grid;place-items:center;font-weight:700;font-size:18px;letter-spacing:-.03em}
+.svc-logo.notion{background:#fff;color:#000;border:1px solid var(--border);font-family:Georgia,"Times New Roman",serif;font-size:22px}
+.svc-logo.google{background:#fff;color:#4285f4;border:1px solid var(--border);font-family:Arial,sans-serif}
+.svc-logo.dropbox{background:#0061ff;color:#fff}
+.svc-logo.cal{background:#ffb34022;color:var(--amber);font-size:20px}
+.svc-title{flex:1;min-width:0}
+.svc-title h3{margin:0;font-size:16px;letter-spacing:-.015em}
+.svc-title p{margin:3px 0 0;font-size:12.5px;line-height:1.45;color:var(--text-2)}
+.status{flex:none;font-size:11px;font-weight:600;padding:3px 8px;border-radius:999px;background:var(--bg-sunken);color:var(--text-3);white-space:nowrap;margin-top:2px}
+.status.on{background:color-mix(in srgb,var(--green) 18%,transparent);color:var(--green)}
+.svc-body{border-top:1px solid var(--border);padding:14px}
+.svc-body .kv{border:0;padding:0 0 12px;grid-template-columns:96px 1fr}
+.svc-body .field:last-child{margin-bottom:0}
+.opt{padding:14px 0 4px;border-top:1px solid var(--border);margin-top:10px}
+.opt h4{margin:0 0 4px;font-size:13.5px;letter-spacing:-.01em}
+.opt p{margin:0 0 10px;font-size:12.5px;color:var(--text-2);line-height:1.5}
+.setup-details{margin:0 0 12px;font-size:13px}
+.setup-details summary{cursor:pointer;color:var(--accent);font-size:13px;margin-bottom:6px}
+.setup-details .steps{margin-top:8px}
+.event.google{cursor:pointer}
+.event.google:active{background:var(--card-hi)}
+
 /* ── habits ─────────────────────────────────────────── */
 .habit{display:flex;gap:11px;align-items:center;padding:11px 13px;margin-bottom:7px;
   background:var(--card);border:1px solid var(--border);border-radius:var(--radius)}

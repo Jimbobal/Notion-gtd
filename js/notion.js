@@ -76,6 +76,7 @@ const SCHEMA = {
     Focus:     { checkbox: {} },
     Completed: { date: {} },
     Notes:     { rich_text: {} },
+    Attachments: { files: {} },
   }),
   items: ids => ({
     Name:         { title: {} },
@@ -92,6 +93,8 @@ const SCHEMA = {
     Repeat:       sel(REPEATS),
     Completed:    { date: {} },
     Notes:        { rich_text: {} },
+    'Event ID':   { rich_text: {} },
+    Attachments:  { files: {} },
   }),
   habits: () => ({
     Name:      { title: {} },
@@ -117,15 +120,16 @@ const SCHEMA = {
 const REQUIRED = {
   items:    { Name:'title', Status:'select', Context:'select', Tags:'multi_select', Project:'relation', Area:'relation',
               Date:'date', Time:'number', Energy:'select', 'Waiting on':'rich_text', Focus:'checkbox',
-              Repeat:'select', Completed:'date', Notes:'rich_text' },
+              Repeat:'select', Completed:'date', Notes:'rich_text', 'Event ID':'rich_text', Attachments:'files' },
   projects: { Name:'title', Status:'select', Area:'relation', Goal:'relation', Outcome:'rich_text', Due:'date',
-              Focus:'checkbox', Completed:'date', Notes:'rich_text' },
+              Focus:'checkbox', Completed:'date', Notes:'rich_text', Attachments:'files' },
   horizons: { Name:'title', Level:'select', Status:'select', Parent:'relation', Target:'date', Notes:'rich_text' },
   habits:   { Name:'title', Frequency:'select', Target:'number', Status:'select', Notes:'rich_text' },
   habitLog: { Name:'title', Habit:'relation', Date:'date' },
   perspectives: { Name:'title', Filter:'rich_text', Order:'number' },
 };
 
+const ADDABLE = new Set(['rich_text', 'files', 'number', 'checkbox', 'date', 'url']);
 const text = s => [{ type:'text', text:{ content: String(s).slice(0, 2000) } }];
 const plain = rt => (rt || []).map(x => x.plain_text ?? x.text?.content ?? '').join('');
 export const bare = id => String(id || '').replace(/-/g, '');
@@ -212,10 +216,16 @@ export async function verifyDatabases(ids, token = cfg()?.token) {
     let db;
     try { db = await relay(`databases/${ids[key]}`, {}, token); }
     catch (e) { problems.push(`${DB_TITLES[key]}: ${e.message}`); continue; }
+    const missing = {};
     for (const [name, type] of Object.entries(req)) {
       const p = db.properties?.[name];
-      if (!p) problems.push(`${DB_TITLES[key]} has no "${name}" property.`);
+      if (!p) { if (ADDABLE.has(type)) missing[name] = { [type]: {} }; else problems.push(`${DB_TITLES[key]} has no "${name}" property.`); }
       else if (p.type !== type) problems.push(`${DB_TITLES[key]}: "${name}" is ${p.type}, expected ${type}.`);
+    }
+    /* A column this version added since the database was created: add it. */
+    if (Object.keys(missing).length) {
+      try { await relay(`databases/${ids[key]}`, { method:'PATCH', body:{ properties: missing } }, token); }
+      catch (e) { problems.push(`${DB_TITLES[key]}: could not add ${Object.keys(missing).join(', ')} — ${e.message}`); }
     }
     if (key === 'items' && db.properties?.Context?.select) {
       state.contexts = db.properties.Context.select.options.map(o => ({ id:o.id, name:o.name, color:o.color }));
@@ -234,6 +244,7 @@ const getNum   = (page, n) => P(page, n)?.number ?? null;
 const getBool  = (page, n) => !!P(page, n)?.checkbox;
 const getRel   = (page, n) => bare(P(page, n)?.relation?.[0]?.id) || null;
 const getTitle = page => plain(Object.values(page.properties || {}).find(x => x.type === 'title')?.title);
+const getFiles = (page, n) => (P(page, n)?.files || []).map(f => ({ name: f.name || 'file', url: f.external?.url || f.file?.url || '' })).filter(f => f.url);
 
 export const toItem = pg => ({
   id: bare(pg.id), name: getTitle(pg), status: getSel(pg, 'Status') || 'Inbox',
@@ -242,13 +253,15 @@ export const toItem = pg => ({
   date: getDate(pg, 'Date'), time: getNum(pg, 'Time'), energy: getSel(pg, 'Energy'),
   waitingOn: getText(pg, 'Waiting on'), focus: getBool(pg, 'Focus'),
   repeat: getSel(pg, 'Repeat') || 'None', completed: getDate(pg, 'Completed'),
-  notes: getText(pg, 'Notes'), created: pg.created_time, edited: pg.last_edited_time, url: pg.url,
+  notes: getText(pg, 'Notes'), eventId: getText(pg, 'Event ID'), attachments: getFiles(pg, 'Attachments'),
+  created: pg.created_time, edited: pg.last_edited_time, url: pg.url,
 });
 export const toProject = pg => ({
   id: bare(pg.id), name: getTitle(pg), status: getSel(pg, 'Status') || 'Active',
   areaId: getRel(pg, 'Area'), goalId: getRel(pg, 'Goal'), outcome: getText(pg, 'Outcome'),
   due: getDate(pg, 'Due'), focus: getBool(pg, 'Focus'), completed: getDate(pg, 'Completed'),
-  notes: getText(pg, 'Notes'), created: pg.created_time, edited: pg.last_edited_time, url: pg.url,
+  notes: getText(pg, 'Notes'), attachments: getFiles(pg, 'Attachments'),
+  created: pg.created_time, edited: pg.last_edited_time, url: pg.url,
 });
 export const toHorizon = pg => ({
   id: bare(pg.id), name: getTitle(pg), level: getSel(pg, 'Level') || 'Area',
@@ -280,6 +293,7 @@ const D  = v => ({ date: v ? { start: v } : null });
 const R  = v => ({ relation: v ? [{ id: v }] : [] });
 const NM = v => ({ number: (v === '' || v === null || v === undefined) ? null : Number(v) });
 const CB = v => ({ checkbox: !!v });
+const FL = v => ({ files: (v || []).filter(f => f.url).slice(0, 100).map(f => ({ type:'external', name: String(f.name || 'file').slice(0, 100), external:{ url: f.url } })) });
 
 const ITEM_PROPS = {
   name: v => ({ Name: { title: text(v) } }), status: v => ({ Status: S(v) }),
@@ -288,12 +302,13 @@ const ITEM_PROPS = {
   time: v => ({ Time: NM(v) }), energy: v => ({ Energy: S(v) }), waitingOn: v => ({ 'Waiting on': RT(v) }),
   focus: v => ({ Focus: CB(v) }), repeat: v => ({ Repeat: S(v && v !== 'None' ? v : 'None') }),
   completed: v => ({ Completed: D(v) }), notes: v => ({ Notes: RT(v) }),
+  eventId: v => ({ 'Event ID': RT(v) }), attachments: v => ({ Attachments: FL(v) }),
 };
 const PROJECT_PROPS = {
   name: v => ({ Name: { title: text(v) } }), status: v => ({ Status: S(v) }),
   areaId: v => ({ Area: R(v) }), goalId: v => ({ Goal: R(v) }), outcome: v => ({ Outcome: RT(v) }),
   due: v => ({ Due: D(v) }), focus: v => ({ Focus: CB(v) }), completed: v => ({ Completed: D(v) }),
-  notes: v => ({ Notes: RT(v) }),
+  notes: v => ({ Notes: RT(v) }), attachments: v => ({ Attachments: FL(v) }),
 };
 const HORIZON_PROPS = {
   name: v => ({ Name: { title: text(v) } }), level: v => ({ Level: S(v) }), status: v => ({ Status: S(v) }),

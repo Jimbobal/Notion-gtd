@@ -1,13 +1,16 @@
 /* Calendar — the hard landscape. Your own dated items (calendar entries,
-   deadlines, chase-by dates) together with events from any external
-   calendar you subscribe to, day by day. */
+   deadlines, chase-by dates) together with Google events, day by day.
+   Google events open in a sheet where they can be edited, deleted or
+   turned into a GTD item; new Google events can be created from any day. */
 'use strict';
-import { list, head, section, empty, esc, attr } from '../ui.js';
-import { datedItems, ticklerItems, today, addDays, addMonths, startOfWeek, dayOf, fmtDay, parseDay, isOverdue, hasTime } from '../model.js';
-import { events, feeds, feedById, toggleFeed } from '../feeds.js';
+import { list, head, section, empty, esc, attr, openSheet, closeSheet, toast, field, options } from '../ui.js';
+import { datedItems, ticklerItems, today, addDays, addMonths, startOfWeek, dayOf, fmtDay, parseDay, isOverdue } from '../model.js';
+import { events, sources, sourceById, toggleSource, eventById } from '../feeds.js';
+import { googleConnected } from '../google.js';
+import { writableCalendars, eventBody, createEvent, updateEvent, deleteEvent, refreshGoogleEvents } from '../gcal.js';
 import { buildICS } from '../ics.js';
 import { openEdit } from './item.js';
-import { toast } from '../ui.js';
+import * as A from '../actions.js';
 
 let sel = null;          // selected day, or null for the agenda
 let monthAt = null;      // first day of the month shown, or null for the week strip
@@ -29,19 +32,21 @@ function eventsByDay() {
 }
 
 function eventRow(e) {
-  const f = feedById(e.feedId);
-  const when = e.allDay ? (e.days > 1 ? `Day ${1 + (e.continued ? 0 : 0)}` && 'All day' : 'All day') : e.start.slice(11) + (e.end.slice(0, 10) === e.start.slice(0, 10) ? '–' + e.end.slice(11) : '');
-  return `<div class="event ${e.transparent ? 'free' : ''}" style="--fc:${f?.color || 'var(--blue)'}" title="${attr(f?.name || '')}">
+  const src = sourceById(e.feedId);
+  const when = e.allDay ? 'All day' : e.start.slice(11) + (e.end.slice(0, 10) === e.start.slice(0, 10) ? '–' + e.end.slice(11) : '');
+  return `<div class="event ${e.kind || ''} ${e.transparent ? 'free' : ''}" style="--fc:${src?.color || 'var(--blue)'}" title="${attr(src?.name || '')}" data-act="ev-open" data-id="${attr(e.id)}">
     <span class="ev-time">${esc(when)}</span>
-    <span class="ev-body"><span class="ev-title">${esc(e.title)}${e.continued ? ' <span class="ev-cont">(cont.)</span>' : ''}</span>${e.location ? `<span class="ev-loc">${esc(e.location)}</span>` : ''}</span>
+    <span class="ev-body"><span class="ev-title">${esc(e.title)}${e.continued ? ' <span class="ev-cont">(cont.)</span>' : ''}${e.gtdItem ? ' <span class="ev-cont">· mirrored item</span>' : ''}</span>${e.location ? `<span class="ev-loc">${esc(e.location)}</span>` : ''}</span>
   </div>`;
 }
 
-/* One day's block: events first (they have fixed times), then items. */
+/* One day's block: events first (they have fixed times), then items.
+   Mirrored copies of the app's own items are not shown twice. */
 function dayBlock(day, items, evs, o = {}) {
-  const n = items.length + evs.length;
+  const shown = evs.filter(e => !e.gtdItem);
+  const n = items.length + shown.length;
   if (!n && !o.always) return '';
-  const body = evs.map(eventRow).join('') + (items.length ? list(items) : (evs.length ? '' : '<div class="empty">A clear day</div>'));
+  const body = shown.map(eventRow).join('') + (items.length ? list(items) : (shown.length ? '' : '<div class="empty">A clear day</div>'));
   return section(`cal-${day}`, o.label || fmtDay(day), n, body);
 }
 
@@ -50,12 +55,13 @@ export function render() {
   const days = byDay(items);
   const ev = eventsByDay();
   const t = today();
-  const count = d => (days[d] || []).length + (ev[d] || []).length;
+  const count = d => (days[d] || []).length + (ev[d] || []).filter(e => !e.gtdItem).length;
+  const srcs = sources();
 
-  const legend = feeds().length
-    ? `<div class="feed-legend">${feeds().map(f => `<button class="pill small feed ${f.on ? 'is-on' : ''}" data-act="cal-feed" data-id="${f.id}" style="--fc:${f.color}"><i class="feed-dot"></i>${esc(f.name)}</button>`).join('')}
+  const legend = srcs.length
+    ? `<div class="feed-legend">${srcs.map(s => `<button class="pill small feed ${s.on ? 'is-on' : ''}" data-act="cal-source" data-id="${attr(s.id)}" style="--fc:${s.color}"><i class="feed-dot"></i>${esc(s.name)}</button>`).join('')}
         <button class="pill small" data-act="cal-export" title="Download your dated items as .ics">⤓ .ics</button></div>`
-    : `<p class="hint">Show Google, Outlook or iCloud events here too: add a calendar in <a href="#/settings">Settings</a>. <button class="link-btn" data-act="cal-export">Download your items as .ics</button></p>`;
+    : `<p class="hint">See your Google Calendar here too, and edit it: connect it in <a href="#/integrations">Integrations</a>. <button class="link-btn" data-act="cal-export">Download your items as .ics</button></p>`;
 
   let picker;
   if (monthAt) {
@@ -83,11 +89,13 @@ export function render() {
           <div class="dn">${parseDay(d).toLocaleDateString('en-GB', { weekday: 'short' })}</div><div class="dd">${parseDay(d).getDate()}</div><div class="dc">${n ? '●'.repeat(Math.min(n, 3)) : ''}</div></button>`; }).join('')}</div>`;
   }
 
+  const addButtons = day => `<button class="link-btn" data-act="cal-add" data-v="${day}">+ Item</button>${googleConnected() && writableCalendars().length ? ` <button class="link-btn" data-act="cal-add-google" data-v="${day}">+ Google event</button>` : ''}`;
+
   let body;
   if (sel) {
-    const its = days[sel] || [], evs = ev[sel] || [];
+    const its = days[sel] || [], evs = (ev[sel] || []).filter(e => !e.gtdItem);
     const tick = ticklerItems().filter(i => dayOf(i.date) === sel);
-    body = `${head(fmtDay(sel, { withYear: true }), its.length + evs.length, ` <button class="link-btn" data-act="cal-add" data-v="${sel}">+ Add</button>`)}
+    body = `${head(fmtDay(sel, { withYear: true }), its.length + evs.length, ' ' + addButtons(sel))}
       ${evs.map(eventRow).join('')}${list(its, {}, evs.length ? '' : 'Nothing on this day')}
       ${tick.length ? head('Tickler resurfaces', tick.length) + list(tick) : ''}
       <p class="hint" style="margin-top:8px"><button class="link-btn" data-act="cal-clear">Show the whole agenda</button></p>`;
@@ -100,14 +108,57 @@ export function render() {
     }
     const horizon = addDays(t, 6);
     const later = items.filter(i => dayOf(i.date) > horizon);
-    const laterEv = events().filter(e => e.day > horizon);
-    body = (overdue.length ? section('cal-over', 'Overdue', overdue.length, list(overdue)) : '')
+    const laterEv = events().filter(e => e.day > horizon && !e.gtdItem);
+    body = `<p class="hint" style="margin:-4px 0 8px">${addButtons(t)}</p>`
+      + (overdue.length ? section('cal-over', 'Overdue', overdue.length, list(overdue)) : '')
       + blocks
       + (later.length ? section('cal-later', 'Later', later.length, list(later)) : '')
       + (laterEv.length ? `<p class="hint">${laterEv.length} more event${laterEv.length > 1 ? 's' : ''} further out — open the month view.</p>` : '')
       + (!items.length && !events().length ? empty('Nothing scheduled', '<br>Calendar entries, deadlines on next actions and chase-by dates all show here.') : '');
   }
   return legend + picker + body;
+}
+
+/* ── Google event sheet ────────────────────────────────── */
+function eventForm(e = {}, o = {}) {
+  const cals = writableCalendars();
+  const day = e.day || o.day || today();
+  const time = e.allDay === false ? e.start.slice(11) : '';
+  const endTime = e.allDay === false && e.end.slice(0, 10) === e.start.slice(0, 10) ? e.end.slice(11) : '';
+  return `<h3>${e.id ? 'Edit event' : 'New Google event'}</h3>
+    <form id="gevent-form" data-id="${attr(e.eventId || '')}" data-cal="${attr(e.calendarId || '')}">
+      ${field('Title', `<input name="title" value="${attr(e.title || '')}" required autofocus>`)}
+      <div class="row3">
+        ${field('Day', `<input type="date" name="day" value="${day}" required>`)}
+        ${field('From', `<input type="time" name="time" value="${time}">`)}
+        ${field('To', `<input type="time" name="endTime" value="${endTime}">`)}
+      </div>
+      <label class="check-row"><input type="checkbox" name="allDay" ${e.allDay || (!e.id && !o.time) ? 'checked' : ''}><span><strong>All day</strong>Leave the times blank, or tick this</span></label>
+      ${field('Location', `<input name="location" value="${attr(e.location || '')}">`)}
+      ${field('Notes', `<textarea name="description">${esc(e.description || '')}</textarea>`)}
+      ${e.id ? '' : field('Calendar', `<select name="calendarId">${options(cals.map(c => [c.id, c.name]), o.calendarId || cals[0]?.id || '')}</select>`)}
+      <div class="sheet-actions">
+        <button type="submit" class="btn primary">${e.id ? 'Save' : 'Create'}</button>
+        ${e.id ? `<button type="button" class="btn danger" data-act="ev-delete" data-id="${attr(e.id)}">Delete</button>` : ''}
+        <button type="button" class="btn" data-act="close">Cancel</button>
+      </div></form>`;
+}
+
+function openEvent(id) {
+  const e = eventById(id); if (!e) return;
+  const src = sourceById(e.feedId);
+  if (e.kind !== 'google') {
+    return openSheet(`<h3>${esc(e.title)}</h3>
+      <dl class="kv"><dt>When</dt><dd>${e.allDay ? fmtDay(e.day) + ' · all day' : `${fmtDay(e.day)} ${e.start.slice(11)}–${e.end.slice(11)}`}</dd>
+        ${e.location ? `<dt>Where</dt><dd>${esc(e.location)}</dd>` : ''}<dt>Calendar</dt><dd>${esc(src?.name || '')} (read only)</dd></dl>
+      <div class="sheet-actions"><button class="btn" data-act="ev-to-item" data-id="${attr(e.id)}">Make a GTD item</button><button class="btn" data-act="close">Close</button></div>`);
+  }
+  const writable = src?.writable;
+  openSheet(`${writable ? eventForm(e) : `<h3>${esc(e.title)}</h3><p class="note">${esc(src?.name || '')} is read only.</p>`}
+    <div class="sheet-actions plain">
+      ${e.gtdItem ? `<button class="btn" data-act="item-open" data-id="${attr(e.gtdItem)}">Open the GTD item</button>` : `<button class="btn" data-act="ev-to-item" data-id="${attr(e.id)}">Make a GTD item</button>`}
+      ${e.htmlLink ? `<a class="btn" href="${attr(e.htmlLink)}" target="_blank" rel="noopener">Open in Google Calendar</a>` : ''}
+    </div>`);
 }
 
 function download(name, text) {
@@ -118,7 +169,7 @@ function download(name, text) {
 }
 
 export async function act(name, el) {
-  const v = el.dataset.v;
+  const v = el.dataset.v, id = el.dataset.id;
   switch (name) {
     case 'cal-day':   sel = sel === v ? null : v; return 'render';
     case 'cal-clear': sel = null; return 'render';
@@ -126,8 +177,43 @@ export async function act(name, el) {
     case 'cal-week':  monthAt = null; return 'render';
     case 'cal-month': monthAt = v === '0' ? (sel || today()).slice(0, 8) + '01' : addMonths(monthAt, Number(v)); return 'render';
     case 'cal-add':   openEdit(null, { status: 'Calendar', day: v }); return true;
-    case 'cal-feed':  toggleFeed(el.dataset.id); return 'render';
+    case 'cal-add-google': openSheet(eventForm({}, { day: v })); return true;
+    case 'cal-source': toggleSource(id); if (id.startsWith('g:')) document.dispatchEvent(new CustomEvent('gtd:google')); return 'render';
     case 'cal-export': download('gtd-calendar.ics', buildICS(datedItems())); toast('Downloaded — import it into any calendar'); return true;
+    case 'ev-open': openEvent(id); return true;
+    case 'ev-delete': {
+      const e = eventById(id); if (!e) return true;
+      if (!confirm('Delete this event from Google Calendar?')) return true;
+      closeSheet();
+      try { await deleteEvent(e.calendarId, e.eventId); toast('Event deleted'); await refreshGoogleEvents({ force: true }); }
+      catch (err) { toast(err.message, 6000); }
+      return 'render';
+    }
+    case 'ev-to-item': {
+      const e = eventById(id); if (!e) return true;
+      closeSheet();
+      const date = e.allDay ? e.day : A.combineDate(e.day, e.start.slice(11));
+      const mins = e.allDay ? null : Math.max(5, Math.round((new Date(e.end) - new Date(e.start)) / 60000));
+      await A.addItem({ name: e.title, status: 'Calendar', date, time: mins, notes: [e.location, e.description].filter(Boolean).join('\n'),
+                        eventId: e.kind === 'google' ? `${e.calendarId}/${e.eventId}` : '' });
+      if (e.kind === 'google') await refreshGoogleEvents({ force: true }).catch(() => {});
+      return 'render';
+    }
   }
   return false;
+}
+
+export async function submit(form) {
+  if (form.id !== 'gevent-form') return false;
+  const f = Object.fromEntries(new FormData(form));
+  const body = eventBody({ title: f.title.trim(), day: f.day, time: f.allDay ? '' : f.time, endTime: f.allDay ? '' : f.endTime,
+                           allDay: !!f.allDay || !f.time, location: f.location.trim(), description: f.description.trim() });
+  closeSheet();
+  try {
+    if (form.dataset.id) { await updateEvent(form.dataset.cal, form.dataset.id, body); toast('Event saved ✓'); }
+    else { await createEvent(f.calendarId, body); toast('Event created in Google Calendar ✓'); }
+    await refreshGoogleEvents({ force: true });
+  } catch (e) { toast(e.message, 6000); }
+  document.dispatchEvent(new CustomEvent('gtd:render'));
+  return true;
 }

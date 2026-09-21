@@ -1,14 +1,16 @@
-/* External calendars: subscription addresses (.ics) that Google, Outlook
-   and iCloud publish. Fetched through api/ics, expanded here, cached per
-   device, and drawn into the Calendar next to the app's own items. */
+/* Calendar sources for the Calendar view: Google calendars (two-way, via
+   gcal.js) and, as a read-only fallback, .ics subscription addresses. One
+   list of sources, one merged list of events, one refresh. */
 'use strict';
 import { store, cfg, saveCfg } from './store.js';
 import { expandICS } from './ics.js';
+import { googleCalendars, toggleCalendar, googleEvents, refreshGoogleEvents } from './gcal.js';
 
 const LS_EVENTS = 'gtd.events';
 const WINDOW_BACK = 35, WINDOW_FWD = 180;
 export const FEED_COLORS = ['#5ac8fa', '#ff7ab6', '#ffb340', '#38d39f', '#c08cff', '#ff5f6d'];
 
+/* ── .ics subscriptions ───────────────────────────────── */
 export const feeds = () => (cfg()?.feeds || []);
 export function saveFeeds(list) { saveCfg({ feeds: list }); }
 export function addFeed({ name, url }) {
@@ -28,12 +30,10 @@ const cache = () => store.get(LS_EVENTS, { fetchedAt: {}, byFeed: {}, errors: {}
 export const feedError = id => cache().errors?.[id] || null;
 export const feedFetchedAt = id => cache().fetchedAt?.[id] || null;
 
-/* Every event from every switched-on feed, sorted by start. */
-export function events() {
+const icsEvents = () => {
   const c = cache(), on = new Set(feeds().filter(f => f.on).map(f => f.id));
-  return Object.entries(c.byFeed).filter(([id]) => on.has(id)).flatMap(([, evs]) => evs).sort((a, b) => a.start < b.start ? -1 : 1);
-}
-export const feedById = id => feeds().find(f => f.id === id) || null;
+  return Object.entries(c.byFeed).filter(([id]) => on.has(id)).flatMap(([, evs]) => evs.map(e => ({ ...e, kind: 'ics' })));
+};
 
 export async function fetchFeed(f) {
   const res = await fetch(`api/ics?url=${encodeURIComponent(f.url)}`);
@@ -49,27 +49,45 @@ export async function fetchFeed(f) {
   return expandICS(text, { from, to, feedId: f.id });
 }
 
-/* Refresh feeds older than maxAge (ms), or all of them when forced. */
 export async function refreshFeeds({ force = false, maxAge = 30 * 60e3 } = {}) {
   const c = cache();
   let changed = false;
   for (const f of feeds()) {
     const age = Date.now() - (c.fetchedAt[f.id] || 0);
     if (!force && age < maxAge) continue;
-    try {
-      c.byFeed[f.id] = await fetchFeed(f);
-      c.fetchedAt[f.id] = Date.now();
-      delete c.errors[f.id];
-    } catch (e) {
-      c.errors[f.id] = e.message;
-    }
+    try { c.byFeed[f.id] = await fetchFeed(f); c.fetchedAt[f.id] = Date.now(); delete c.errors[f.id]; }
+    catch (e) { c.errors[f.id] = e.message; }
     changed = true;
   }
   if (changed) store.set(LS_EVENTS, c);
   return changed;
 }
 
-/* Prefilled "add to calendar" links for one item, as Lens does it. */
+/* ── all sources together ─────────────────────────────── */
+export function sources() {
+  return [
+    ...googleCalendars().map(c => ({ id: `g:${c.id}`, kind: 'google', name: c.name, color: c.color, on: c.on !== false, writable: c.writable })),
+    ...feeds().map(f => ({ id: f.id, kind: 'ics', name: f.name, color: f.color, on: f.on })),
+  ];
+}
+export const sourceById = id => sources().find(s => s.id === id) || null;
+export function toggleSource(id) { if (id.startsWith('g:')) toggleCalendar(id.slice(2)); else toggleFeed(id); }
+
+export function events() {
+  return [...googleEvents(), ...icsEvents()].sort((a, b) => a.start < b.start ? -1 : a.start > b.start ? 1 : 0);
+}
+export const eventById = id => events().find(e => e.id === id) || null;
+
+/* Refresh everything that is stale. Google errors are kept for the view
+   to show; they never block the .ics feeds. */
+export async function refreshAll({ force = false } = {}) {
+  const a = await refreshFeeds({ force });
+  let b = false;
+  try { b = await refreshGoogleEvents({ force }); } catch {}
+  return a || b;
+}
+
+/* Prefilled "add to calendar" links for one item. */
 const pad2 = n => String(n).padStart(2, '0');
 const stampUTC = d => d.toISOString().replace(/[-:]/g, '').replace(/\.\d{3}/, '');
 export function calendarLinks(item) {

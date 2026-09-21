@@ -60,6 +60,7 @@ function start(port) {
       case 'number': return { type, number: value.number ?? null };
       case 'checkbox': return { type, checkbox: !!value.checkbox };
       case 'url': return { type, url: value.url || null };
+      case 'files': return { type, files: (value.files || []).map(f => ({ name: f.name, type: 'external', external: { url: f.external?.url || f.url } })) };
       default: return { type, [type]: value[type] };
     }
   };

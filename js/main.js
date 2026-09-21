@@ -6,7 +6,10 @@ import { sync, refreshOptions, NotionError } from './notion.js';
 import { esc, toast, closeSheet, sheetOpen, toggleFold } from './ui.js';
 import { inboxItems, nextItems, waitingItems, stalledProjects, dueTickler, reviewDueIn, activeHabits, habitDue, habitDoneToday } from './model.js';
 import * as A from './actions.js';
-import { refreshFeeds } from './feeds.js';
+import { refreshAll } from './feeds.js';
+import { refreshGoogleEvents } from './gcal.js';
+import * as attach from './views/attach.js';
+import * as integrations from './views/integrations.js';
 import * as item from './views/item.js';
 import * as clarify from './views/clarify.js';
 import * as setup from './views/setup.js';
@@ -26,14 +29,14 @@ import * as settings from './views/settings.js';
 import * as search from './views/search.js';
 
 const VIEWS = { inbox, next, calendar, waiting, projects, someday, tickler, reference, horizons, habits,
-                review, perspectives, stats: statsView, trash, settings, search };
+                review, perspectives, stats: statsView, trash, settings, search, integrations };
 
 const NAV = [
   { links: [['inbox', 'Inbox', '◉']] },
   { label: 'Engage', links: [['next', 'Next Actions', '▶'], ['calendar', 'Calendar', '▦'], ['waiting', 'Waiting For', '⚑']] },
   { label: 'Lists', links: [['projects', 'Projects', '▤'], ['someday', 'Someday / Maybe', '☁'], ['tickler', 'Tickler', '↻'], ['reference', 'Reference', '▣']] },
   { label: 'Reflect', links: [['horizons', 'Horizons', '◎'], ['habits', 'Habits', '✓'], ['review', 'Weekly Review', '◈'], ['perspectives', 'Perspectives', '⊞'], ['stats', 'Statistics', '≣']] },
-  { links: [['trash', 'Trash', '✕'], ['settings', 'Settings', '⚙']] },
+  { links: [['trash', 'Trash', '✕'], ['integrations', 'Integrations', '⇄'], ['settings', 'Settings', '⚙']] },
 ];
 const TABS = [['inbox', 'Inbox', '◉'], ['next', 'Next', '▶'], ['calendar', 'Calendar', '▦'], ['projects', 'Projects', '▤']];
 
@@ -130,7 +133,7 @@ async function doSync({ full = false, quiet = false } = {}) {
     if (prefs().autoTickler) { const due = dueTickler(); if (due.length) { await A.surfaceTickler(due); surfaced = due.length; } }
     if (surfaced) toast(`Synced · ${surfaced} tickler item${surfaced > 1 ? 's' : ''} back in the Inbox`, 3500);
     else if (!quiet && needFull) toast('Synced with Notion');
-    if (await refreshFeeds({ force: full })) render();
+    if (await refreshAll({ force: full })) render();
   } catch (e) {
     state.loading = false;
     state.error = e.message;
@@ -157,7 +160,7 @@ async function dispatch(name, el, ev) {
     case 'done':    ev.stopPropagation(); await A.completeItem(el.dataset.id); return true;
   }
   const v = VIEWS[state.route.name];
-  for (const mod of [item, clarify, v, setup]) {
+  for (const mod of [item, clarify, attach, v, setup]) {
     const r = await mod.act?.(name, el, ev);
     if (r === 'render') render();
     if (r) return true;
@@ -191,7 +194,7 @@ document.addEventListener('submit', async e => {
   const form = e.target; form._submitter = e.submitter;
   const v = VIEWS[state.route.name];
   try {
-    for (const mod of [item, clarify, v, setup]) { if (await mod.submit?.(form)) return; }
+    for (const mod of [item, clarify, attach, v, setup]) { if (await mod.submit?.(form)) return; }
   } catch (err) { console.error(err); toast(err.message, 5000); }
 });
 
@@ -222,7 +225,16 @@ document.addEventListener('keydown', e => {
 
 document.addEventListener('gtd:render', () => render());
 document.addEventListener('gtd:sync', e => doSync(e.detail || {}));
-document.addEventListener('gtd:feeds', async () => { await refreshFeeds({ force: true }); render(); });
+document.addEventListener('gtd:feeds', async () => { await refreshAll({ force: true }); render(); });
+document.addEventListener('gtd:google', async () => {
+  try { await refreshGoogleEvents({ force: true }); } catch (e) { toast(`Google Calendar: ${e.message}`, 6000); }
+  render();
+});
+/* A sheet asks to be redrawn after an attachment changed. */
+document.addEventListener('gtd:reopen', e => {
+  const { kind, id } = e.detail;
+  if (kind === 'items') item.openItem(id); else render();
+});
 document.addEventListener('gtd:theme', applyTheme);
 document.addEventListener('gtd:setup-done', () => bootApp());
 window.addEventListener('hashchange', onRoute);

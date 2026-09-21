@@ -8,6 +8,7 @@ import { activeProjects, somedayProjects, doneProjects, projectById, projectItem
          horizonById, fmtDay, sortNext, ago, today } from '../model.js';
 import * as A from '../actions.js';
 import { openEdit } from './item.js';
+import { attachSection } from './attach.js';
 
 let tab = 'Active';
 export const title = r => r.id ? (projectById(r.id)?.name || 'Project') : 'Projects';
@@ -50,6 +51,7 @@ function detail(id) {
       <button class="btn" data-act="proj-edit" data-id="${p.id}">Edit</button>
       ${p.status === 'Active' ? `<button class="btn" data-act="proj-complete" data-id="${p.id}">Complete ✓</button>` : ''}
     </div>
+    ${attachSection('projects', p)}
     ${next.length ? head('Next actions', next.length) + list(next, { hideProj: true }) : ''}
     ${inbox.length ? head('In the Inbox', inbox.length) + list(inbox, { hideProj: true }) : ''}
     ${cal.length ? head('Scheduled', cal.length) + list(cal, { hideProj: true }) : ''}

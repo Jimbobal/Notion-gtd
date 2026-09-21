@@ -7,6 +7,7 @@
 const assert = require('assert');
 const { chromium } = require('playwright');
 const mock = require('./mock-notion.js');
+const gmock = require('./google-mock.js');
 
 const APP = 'http://localhost:4180';
 const SHOTS = __dirname + '/shots';
@@ -25,6 +26,7 @@ const addDays = (s, n) => { const [y, m, d] = s.split('-').map(Number); const dt
   page.on('pageerror', e => errors.push(String(e)));
   page.on('console', m => { if (m.type() === 'error' && !/401|404|400 \(/.test(m.text())) errors.push(m.text()); });
   page.on('dialog', d => d.accept());
+  const G = await gmock.install(page);
   const toastIs = re => page.waitForFunction(r => new RegExp(r).test(document.querySelector('#toast')?.textContent || ''), re.source, { timeout: 8000 });
   const go = async h => { await page.evaluate(h => { location.hash = h; }, h); await page.waitForTimeout(150); };
   const textOf = sel => page.textContent(sel);
@@ -364,12 +366,14 @@ const addDays = (s, n) => { const [y, m, d] = s.split('-').map(Number); const dt
   await page.screenshot({ path: `${SHOTS}/12-settings-light.png`, fullPage: true });
   await page.click('[data-act=pref-theme][data-v=auto]');
 
-  /* ── 14b. External calendar feed ─────────────────────────── */
+  /* ── 14b. External calendar feed (read-only subscription) ── */
+  await go('#/integrations');
+  await page.waitForSelector('#feed-add-form');
   await page.fill('#feed-add-form input[name=name]', 'Work');
   await page.fill('#feed-add-form input[name=url]', 'http://127.0.0.1:4999/ics/test.ics');
   await page.click('#feed-add-form button[type=submit]');
-  await toastIs(/Calendar added/);
-  await page.waitForFunction(() => /fetched just now/.test(document.querySelector('#view')?.textContent || ''));
+  await toastIs(/Subscription added/);
+  await page.waitForFunction(() => /fetched just now/.test(document.querySelector('#svc-ics')?.textContent || ''));
   await go('#/calendar');
   await page.waitForSelector('.feed-legend');
   await page.waitForFunction(() => /Dentist/.test(document.querySelector('#view')?.textContent || ''));
@@ -400,6 +404,130 @@ const addDays = (s, n) => { const [y, m, d] = s.split('-').map(Number); const dt
   assert.ok(await page.$('#sheet a[href^="https://outlook.live.com/"]'));
   await page.keyboard.press('Escape');
   await page.click('[data-act=cal-clear]');
+
+  /* ── 14c. Integrations: Google Calendar, Drive, Dropbox ───── */
+  await go('#/integrations');
+  await page.waitForSelector('#google-form');
+  assert.match(await textOf('#svc-notion'), /Connected/);
+  await page.fill('#google-form input[name=clientId]', 'client-123');
+  await page.fill('#google-form input[name=apiKey]', 'AIzaTest');
+  await page.click('#google-form button[type=submit]');
+  await page.waitForSelector('[data-act=g-connect]');
+  await page.click('[data-act=g-connect]');
+  await toastIs(/Google connected/);
+  await page.waitForFunction(() => /james@example\.com/.test(document.querySelector('#svc-google')?.textContent || ''));
+  const gtext = await textOf('#svc-google');
+  assert.match(gtext, /James/); assert.match(gtext, /Holidays/); assert.match(gtext, /read only/);
+  assert.equal(await page.evaluate(() => window.__gisPrompt), 'consent', 'first sign-in asks for consent');
+  /* mirror items into the primary calendar */
+  await page.selectOption('select[data-act-change=g-write]', 'james@example.com');
+  await page.waitForSelector('input[data-act-change=g-sync]:not([disabled])');
+  await page.check('input[data-act-change=g-sync]');
+  await toastIs(/mirrored/);
+  const mirrored = G.events['james@example.com'].find(e => e.summary === 'Dentist appointment');
+  assert.ok(mirrored, 'the Calendar item was mirrored to Google');
+  assert.ok(mirrored.start.dateTime && /T09:30/.test(mirrored.start.dateTime), 'with its time');
+  st = await mockState();
+  const dentistAppt = Object.values(st.pages).find(p => p.properties.Name?.title[0].plain_text === 'Dentist appointment');
+  assert.equal(dentistAppt.properties['Event ID'].rich_text[0].plain_text, `james@example.com/${mirrored.id}`);
+  assert.equal(mirrored.extendedProperties.private.gtdItem, dentistAppt.id.replace(/-/g, ''));
+  /* dropbox */
+  await page.fill('#dropbox-form input[name=appKey]', 'dbx-key');
+  await page.click('#dropbox-form button[type=submit]');
+  await toastIs(/Dropbox ready/);
+  await page.waitForFunction(() => /Connected/.test(document.querySelector('#svc-dropbox .status')?.textContent || ''));
+  await page.screenshot({ path: `${SHOTS}/16-integrations.png`, fullPage: true });
+
+  /* ── 14d. Google events in the calendar, both ways ────────── */
+  await go('#/calendar');
+  await page.waitForFunction(() => /Standup \(Google\)/.test(document.querySelector('#view')?.textContent || ''));
+  assert.match(await textOf('.feed-legend'), /James/);
+  assert.match(await textOf('#view'), /Bank holiday/);
+  assert.equal(await page.$$eval('.event', els => els.filter(e => /Dentist appointment/.test(e.textContent)).length), 0, 'a mirrored item is not shown twice');
+  /* edit a Google event */
+  await page.click('.event:has-text("Standup (Google)")');
+  await page.waitForSelector('#gevent-form');
+  await page.fill('#gevent-form input[name=title]', 'Standup (moved)');
+  await page.click('#gevent-form button[type=submit]');
+  await toastIs(/Event saved/);
+  assert.equal(G.events['james@example.com'].find(e => e.id === 'ev_standup').summary, 'Standup (moved)');
+  await page.waitForFunction(() => /Standup \(moved\)/.test(document.querySelector('#view')?.textContent || ''));
+  /* create a Google event */
+  await page.click('[data-act=cal-add-google]');
+  await page.waitForSelector('#gevent-form');
+  await page.fill('#gevent-form input[name=title]', 'Lunch with Sam');
+  await page.uncheck('#gevent-form input[name=allDay]');
+  await page.fill('#gevent-form input[name=time]', '12:30');
+  await page.fill('#gevent-form input[name=endTime]', '13:15');
+  await page.click('#gevent-form button[type=submit]');
+  await toastIs(/Event created/);
+  const lunch = G.events['james@example.com'].find(e => e.summary === 'Lunch with Sam');
+  assert.ok(lunch && /T12:30:00$/.test(lunch.start.dateTime) && /T13:15:00$/.test(lunch.end.dateTime), 'timed event created');
+  await page.waitForFunction(() => /Lunch with Sam/.test(document.querySelector('#view')?.textContent || ''));
+  await page.screenshot({ path: `${SHOTS}/17-calendar-google.png`, fullPage: true });
+  /* a Google event becomes a GTD item, linked, and the read-only original is left alone */
+  await page.click('.event:has-text("Bank holiday")');
+  await page.waitForSelector('[data-act=ev-to-item]');
+  await page.click('[data-act=ev-to-item]');
+  await toastIs(/Added to Calendar/);
+  st = await mockState();
+  const hol = Object.values(st.pages).find(p => p.properties.Name?.title[0].plain_text === 'Bank holiday');
+  assert.equal(hol.properties['Event ID'].rich_text[0].plain_text, 'holidays@group.v.calendar.google.com/ev_hol');
+  assert.ok(G.events['holidays@group.v.calendar.google.com'].some(e => e.id === 'ev_hol'), 'read-only event untouched');
+  /* delete a Google event from the app */
+  await page.click('.event:has-text("Lunch with Sam")');
+  await page.waitForSelector('[data-act=ev-delete]');
+  await page.click('[data-act=ev-delete]');
+  await toastIs(/Event deleted/);
+  assert.ok(!G.events['james@example.com'].some(e => e.summary === 'Lunch with Sam'));
+  /* moving the mirrored item off the Calendar list removes its Google copy */
+  await page.click(`[data-act=cal-day][data-v="${addDays(todayISO(), 1)}"]`);
+  await page.click('#view .item:has-text("Dentist appointment")');
+  await page.click('[data-act=item-move][data-v=Someday]');
+  await toastIs(/Someday/);
+  await page.waitForFunction(() => !/Dentist appointment/.test(document.querySelector('#view')?.textContent || ''));
+  await page.waitForTimeout(300);
+  assert.ok(!G.events['james@example.com'].some(e => e.summary === 'Dentist appointment'), 'mirror removed');
+  st = await mockState();
+  assert.equal(Object.values(st.pages).find(p => p.properties.Name?.title[0].plain_text === 'Dentist appointment').properties['Event ID'].rich_text.length, 0);
+  await page.click('[data-act=cal-clear]');
+
+  /* ── 14e. Attachments: Drive, Dropbox, a Notion link ──────── */
+  await go('#/waiting');
+  await page.click('#view .item:has-text("Call the dentist")');
+  await page.waitForSelector('[data-act=att-drive]');
+  await page.click('[data-act=att-drive]');
+  await toastIs(/Attached/);
+  await page.waitForFunction(() => /Q3 plan\.gdoc/.test(document.querySelector('#sheet')?.textContent || ''));
+  assert.deepEqual(await page.evaluate(() => window.__picker), { token: 'tok_client-123', key: 'AIzaTest' }, 'picker got the token and key');
+  await page.click('[data-act=att-dropbox]');
+  await toastIs(/Attached/);
+  await page.waitForFunction(() => /brief\.pdf/.test(document.querySelector('#sheet')?.textContent || ''));
+  assert.equal(await page.evaluate(() => window.__dropboxKey), 'dbx-key');
+  await page.click('[data-act=att-link]');
+  await page.fill('#attach-link-form input[name=url]', 'https://www.notion.so/Meeting-notes-0123456789abcdef0123456789abcdef');
+  await page.click('#attach-link-form button[type=submit]');
+  await toastIs(/Attached/);
+  await page.waitForFunction(() => document.querySelectorAll('#sheet .attach').length === 3);
+  assert.match(await textOf('#sheet .attach-list'), /Meeting notes/);
+  st = await mockState();
+  const withFiles = Object.values(st.pages).find(p => p.properties.Name?.title[0].plain_text === 'Call the dentist');
+  assert.deepEqual(withFiles.properties.Attachments.files.map(f => f.external.url),
+    ['https://docs.google.com/document/d/abc/edit', 'https://www.dropbox.com/s/abc/brief.pdf?dl=0', 'https://www.notion.so/Meeting-notes-0123456789abcdef0123456789abcdef']);
+  await page.click('#sheet .attach [data-act=att-remove][data-k="1"]');
+  await toastIs(/Removed/);
+  await page.waitForFunction(() => document.querySelectorAll('#sheet .attach').length === 2);
+  await page.keyboard.press('Escape');
+  /* and on a project page */
+  await go('#/projects');
+  await page.click('#view a.card:has-text("Learn the cello")');
+  await page.waitForSelector('[data-act=att-link][data-kind=projects]');
+  await page.click('[data-act=att-link][data-kind=projects]');
+  await page.fill('#attach-link-form input[name=url]', 'https://www.dropbox.com/scl/fo/cello-scores');
+  await page.fill('#attach-link-form input[name=name]', 'Scores');
+  await page.click('#attach-link-form button[type=submit]');
+  await toastIs(/Attached/);
+  await page.waitForFunction(() => /Scores/.test(document.querySelector('#view .attach-list')?.textContent || ''));
 
   /* ── 15. Search ───────────────────────────────────────────── */
   await page.click('#btn-search');
@@ -437,6 +565,15 @@ const addDays = (s, n) => { const [y, m, d] = s.split('-').map(Number); const dt
   await page.screenshot({ path: `${SHOTS}/13-desktop-next.png` });
   await go('#/review');
   await page.screenshot({ path: `${SHOTS}/14-desktop-review.png`, fullPage: true });
+
+  /* Disconnect Google: calendars drop out of the legend */
+  await go('#/integrations');
+  await page.click('[data-act=g-disconnect]');
+  await toastIs(/Google disconnected/);
+  assert.equal(await page.evaluate(() => window.__revoked), 'tok_client-123', 'token revoked');
+  await go('#/calendar');
+  await page.waitForFunction(() => !/Standup \(moved\)/.test(document.querySelector('#view')?.textContent || ''));
+  assert.ok(!/James/.test(await textOf('.feed-legend')), 'Google calendars gone from the legend');
 
   /* ── 18. Adopt on a second device ─────────────────────────── */
   const ctx2 = await browser.newContext({ viewport: { width: 390, height: 844 } });

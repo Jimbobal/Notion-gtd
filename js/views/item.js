@@ -10,6 +10,7 @@ import * as A from '../actions.js';
 import { startClarify } from './clarify.js';
 import { calendarLinks } from '../feeds.js';
 import { buildICS } from '../ics.js';
+import { attachSection } from './attach.js';
 
 const MOVES = ['Inbox','Next','Calendar','Waiting','Someday','Tickler','Reference'];
 
@@ -42,6 +43,7 @@ export function openItem(id) {
       <a class="pill small" href="${attr(l.outlook)}" target="_blank" rel="noopener">Outlook</a>
       <button class="pill small" data-act="item-ics" data-id="${i.id}">.ics file</button>
     </div>`; })() : ''}
+    ${i.status !== 'Trash' ? attachSection('items', i) : ''}
     <div class="section-head" style="margin-top:14px"><h3>Move to</h3></div>
     <div class="pills wrap">${MOVES.filter(s => s !== i.status).map(s =>
       `<button class="pill small" data-act="item-move" data-id="${i.id}" data-v="${s}">${STATUS_LABEL[s]}</button>`).join('')}</div>

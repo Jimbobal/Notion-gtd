@@ -6,6 +6,7 @@ import { state } from './store.js';
 import * as N from './notion.js';
 import { toast, closeSheet } from './ui.js';
 import { today, nextOccurrence, projectItems, STATUS_LABEL, hasTime } from './model.js';
+import { syncItemToGoogle, deleteEvent } from './gcal.js';
 
 export const rerender = () => document.dispatchEvent(new CustomEvent('gtd:render'));
 
@@ -16,11 +17,19 @@ async function guard(fn, okMsg) {
 
 export const itemById = id => state.items.find(i => i.id === id);
 
+/* Keep the Google mirror in step after any change to an item. Never blocks
+   the change itself; a failure is reported and the next write retries. */
+async function mirror(id) {
+  const i = itemById(id); if (!i) return;
+  try { await syncItemToGoogle(i); }
+  catch (e) { toast(`Google Calendar: ${e.message}`, 6000); }
+}
+
 /* Complete. A repeating item spawns its next occurrence and this one is
    kept as the record of having done it. */
 export async function completeItem(id) {
   const i = itemById(id); if (!i) return;
-  if (i.status === 'Done') return guard(() => N.updateItem(id, { status: 'Next', completed: null }), 'Reopened');
+  if (i.status === 'Done') { await guard(() => N.updateItem(id, { status: 'Next', completed: null }), 'Reopened'); return mirror(id); }
   await guard(async () => {
     await N.updateItem(id, { status: 'Done', completed: new Date().toISOString(), focus: false });
     if (i.repeat && i.repeat !== 'None') {
@@ -31,20 +40,28 @@ export async function completeItem(id) {
       toast(`Done ✓ — next one ${date.slice(0, 10)}`);
     }
   }, i.repeat && i.repeat !== 'None' ? null : 'Done ✓');
+  await mirror(id);
 }
 
 export async function moveItem(id, status, extra = {}) {
   const patch = { status, ...extra };
   if (status !== 'Done') patch.completed = null;
   if (status !== 'Waiting' && !('waitingOn' in extra)) patch.waitingOn = '';
-  return guard(() => N.updateItem(id, patch), `Moved to ${STATUS_LABEL[status]}`);
+  const r = await guard(() => N.updateItem(id, patch), `Moved to ${STATUS_LABEL[status]}`);
+  await mirror(id); return r;
 }
 
-export const trashItem   = id => guard(() => N.updateItem(id, { status: 'Trash', focus: false }), 'Moved to Trash');
+export const trashItem   = async id => { const r = await guard(() => N.updateItem(id, { status: 'Trash', focus: false }), 'Moved to Trash'); await mirror(id); return r; };
 export const restoreItem = id => guard(() => N.updateItem(id, { status: 'Inbox' }), 'Restored to Inbox');
 export const toggleFocus = id => { const i = itemById(id); return guard(() => N.updateItem(id, { focus: !i.focus }), !i.focus ? '★ In focus' : 'Out of focus'); };
-export const saveItem    = (id, patch) => guard(() => N.updateItem(id, patch), 'Saved');
-export const addItem     = fields => guard(() => N.createItem(fields), fields.status === 'Inbox' || !fields.status ? 'Captured ✓' : `Added to ${STATUS_LABEL[fields.status]}`);
+export const saveItem    = async (id, patch) => { const r = await guard(() => N.updateItem(id, patch), 'Saved'); await mirror(id); return r; };
+export const addItem     = async fields => { const r = await guard(() => N.createItem(fields), fields.status === 'Inbox' || !fields.status ? 'Captured ✓' : `Added to ${STATUS_LABEL[fields.status]}`); if (r) await mirror(r.id); return r; };
+
+/* Attachments on an item or a project */
+const recOf = (kind, id) => kind === 'projects' ? state.projects.find(p => p.id === id) : itemById(id);
+const upd = (kind, id, patch) => kind === 'projects' ? N.updateProject(id, patch) : N.updateItem(id, patch);
+export const attach = (kind, id, files) => guard(() => upd(kind, id, { attachments: [...(recOf(kind, id)?.attachments || []), ...files.map(f => ({ name: f.name, url: f.url }))] }), `${files.length === 1 ? 'Attached' : files.length + ' attached'} ✓`);
+export const detach = (kind, id, k) => guard(() => upd(kind, id, { attachments: (recOf(kind, id)?.attachments || []).filter((_, i) => i !== k) }), 'Removed');
 
 /* Every tickler item whose date has come goes back to the Inbox. */
 export async function surfaceTickler(items) {
@@ -83,11 +100,15 @@ export async function emptyTrash() {
   const its = state.items.filter(i => i.status === 'Trash');
   const prs = state.projects.filter(p => p.status === 'Trash');
   await guard(async () => {
-    for (const i of its) await N.archivePage('items', i.id);
+    for (const i of its) { if (i.eventId) { const [c, e] = i.eventId.split('/'); try { await deleteEvent(c, e); } catch {} } await N.archivePage('items', i.id); }
     for (const p of prs) await N.archivePage('projects', p.id);
   }, `Trash emptied — ${its.length + prs.length} sent to Notion's trash`);
 }
-export const deleteForever = (key, id) => guard(() => N.archivePage(key, id), 'Deleted (recoverable in Notion for 30 days)');
+export const deleteForever = async (key, id) => {
+  const i = key === 'items' ? itemById(id) : null;
+  if (i?.eventId) { const [c, e] = i.eventId.split('/'); try { await deleteEvent(c, e); } catch {} }
+  return guard(() => N.archivePage(key, id), 'Deleted (recoverable in Notion for 30 days)');
+};
 
 /* Local date+time inputs → what Notion stores. A time gets the local
    offset so it means the same wall-clock hour in Notion. */
