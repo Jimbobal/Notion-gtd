@@ -24,8 +24,8 @@ function draw() {
     <h3>Connect Notion</h3>
     <p class="lead">This app keeps everything in seven Notion databases it creates for you — items, projects, horizons, habits, a habit log, perspectives and the weekly-review checklist. It talks to them through an integration you own.</p>
     <ol class="steps">
-      <li>In Notion, open <a href="https://www.notion.so/profile/integrations" target="_blank" rel="noopener">Settings → Connections → Develop or manage integrations</a> and create an <strong>internal</strong> integration. Give it read, update and insert content capabilities.</li>
-      <li>Copy its <strong>Internal Integration Secret</strong> and paste it here.</li>
+      <li>Open <a href="https://www.notion.so/profile/integrations" target="_blank" rel="noopener">notion.so/profile/integrations</a> (this page is <em>not</em> reachable from Settings → Connections, which only lists existing connections) and click <strong>New integration</strong>. Pick your workspace, type <strong>Internal</strong>, and give it read, update and insert content capabilities. You need to be a workspace owner if the workspace limits who can create internal connections.</li>
+      <li>On the integration's Configuration tab, click <strong>Show</strong> next to <strong>Internal Integration Secret</strong>, copy it and paste it here.</li>
       <li>Create or pick a Notion page to hold the databases, and share it with the integration: open the page → <code>•••</code> → Connections → add it.</li>
     </ol>
     <form id="setup-token">

@@ -115,9 +115,12 @@ endpoints the app uses (`users/me`, `search`, `databases`, `databases/:id`,
 
 ## Setup
 
-1. In Notion: *Settings → Connections → Develop or manage integrations → New
-   integration* (internal). Give it read, update and insert capabilities and
-   copy the secret.
+1. Open https://www.notion.so/profile/integrations and click *New
+   integration* (type: internal). This page is not linked from *Settings →
+   Connections*, which only lists connections that already exist, and
+   creating one needs workspace-owner rights if the workspace restricts it.
+   Give the integration read, update and insert capabilities, then *Show* and
+   copy the Internal Integration Secret.
 2. Create or pick a page to hold the databases and share it with the
    integration (open the page → ••• → Connections).
 3. Open the app, paste the secret, pick the page. The databases are created
