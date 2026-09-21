@@ -6,7 +6,7 @@ import { sync, refreshOptions, NotionError } from './notion.js';
 import { esc, toast, closeSheet, sheetOpen, toggleFold } from './ui.js';
 import { inboxItems, nextItems, waitingItems, stalledProjects, dueTickler, reviewDueIn, activeHabits, habitDue, habitDoneToday } from './model.js';
 import * as A from './actions.js';
-import { refreshAll } from './feeds.js';
+import { refreshAll } from './sources.js';
 import { refreshGoogleEvents } from './gcal.js';
 import * as attach from './views/attach.js';
 import * as integrations from './views/integrations.js';
@@ -225,7 +225,6 @@ document.addEventListener('keydown', e => {
 
 document.addEventListener('gtd:render', () => render());
 document.addEventListener('gtd:sync', e => doSync(e.detail || {}));
-document.addEventListener('gtd:feeds', async () => { await refreshAll({ force: true }); render(); });
 document.addEventListener('gtd:google', async () => {
   try { await refreshGoogleEvents({ force: true }); } catch (e) { toast(`Google Calendar: ${e.message}`, 6000); }
   render();

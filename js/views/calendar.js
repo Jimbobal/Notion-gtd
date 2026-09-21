@@ -5,7 +5,7 @@
 'use strict';
 import { list, head, section, empty, esc, attr, openSheet, closeSheet, toast, field, options } from '../ui.js';
 import { datedItems, ticklerItems, today, addDays, addMonths, startOfWeek, dayOf, fmtDay, parseDay, isOverdue } from '../model.js';
-import { events, sources, sourceById, toggleSource, eventById } from '../feeds.js';
+import { events, sources, sourceById, toggleSource, eventById } from '../sources.js';
 import { googleConnected } from '../google.js';
 import { writableCalendars, eventBody, createEvent, updateEvent, deleteEvent, refreshGoogleEvents } from '../gcal.js';
 import { buildICS } from '../ics.js';
@@ -61,7 +61,7 @@ export function render() {
   const legend = srcs.length
     ? `<div class="feed-legend">${srcs.map(s => `<button class="pill small feed ${s.on ? 'is-on' : ''}" data-act="cal-source" data-id="${attr(s.id)}" style="--fc:${s.color}"><i class="feed-dot"></i>${esc(s.name)}</button>`).join('')}
         <button class="pill small" data-act="cal-export" title="Download your dated items as .ics">⤓ .ics</button></div>`
-    : `<p class="hint">See your Google Calendar here too, and edit it: connect it in <a href="#/integrations">Integrations</a>. <button class="link-btn" data-act="cal-export">Download your items as .ics</button></p>`;
+    : `<p class="hint">See and edit your Google Calendar here: connect it in <a href="#/integrations">Integrations</a>. <button class="link-btn" data-act="cal-export">Export your items as .ics</button></p>`;
 
   let picker;
   if (monthAt) {
@@ -147,12 +147,6 @@ function eventForm(e = {}, o = {}) {
 function openEvent(id) {
   const e = eventById(id); if (!e) return;
   const src = sourceById(e.feedId);
-  if (e.kind !== 'google') {
-    return openSheet(`<h3>${esc(e.title)}</h3>
-      <dl class="kv"><dt>When</dt><dd>${e.allDay ? fmtDay(e.day) + ' · all day' : `${fmtDay(e.day)} ${e.start.slice(11)}–${e.end.slice(11)}`}</dd>
-        ${e.location ? `<dt>Where</dt><dd>${esc(e.location)}</dd>` : ''}<dt>Calendar</dt><dd>${esc(src?.name || '')} (read only)</dd></dl>
-      <div class="sheet-actions"><button class="btn" data-act="ev-to-item" data-id="${attr(e.id)}">Make a GTD item</button><button class="btn" data-act="close">Close</button></div>`);
-  }
   const writable = src?.writable;
   openSheet(`${writable ? eventForm(e) : `<h3>${esc(e.title)}</h3><p class="note">${esc(src?.name || '')} is read only.</p>`}
     <div class="sheet-actions plain">
@@ -195,8 +189,8 @@ export async function act(name, el) {
       const date = e.allDay ? e.day : A.combineDate(e.day, e.start.slice(11));
       const mins = e.allDay ? null : Math.max(5, Math.round((new Date(e.end) - new Date(e.start)) / 60000));
       await A.addItem({ name: e.title, status: 'Calendar', date, time: mins, notes: [e.location, e.description].filter(Boolean).join('\n'),
-                        eventId: e.kind === 'google' ? `${e.calendarId}/${e.eventId}` : '' });
-      if (e.kind === 'google') await refreshGoogleEvents({ force: true }).catch(() => {});
+                        eventId: `${e.calendarId}/${e.eventId}` });
+      await refreshGoogleEvents({ force: true }).catch(() => {});
       return 'render';
     }
   }

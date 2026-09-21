@@ -17,11 +17,10 @@ stop() {
 stop; sleep 0.5
 
 node test/relay.test.js || exit 1
-node test/ics.test.mjs || exit 1
 node test/check-imports.js || exit 1
 
 PORT=$MOCK_PORT node test/mock-notion.js > test/mock.log 2>&1 &
-ICS_ALLOW_HTTP=1 NOTION_UPSTREAM="http://127.0.0.1:$MOCK_PORT/v1" PORT=$APP_PORT node dev-server.js > test/dev.log 2>&1 &
+NOTION_UPSTREAM="http://127.0.0.1:$MOCK_PORT/v1" PORT=$APP_PORT node dev-server.js > test/dev.log 2>&1 &
 for i in $(seq 1 30); do curl -s -o /dev/null "http://localhost:$APP_PORT/" && curl -s -o /dev/null "http://127.0.0.1:$MOCK_PORT/__state" && break; sleep 0.3; done
 
 NODE_PATH="${NODE_PATH:-$(npm root -g)}" node test/e2e.js

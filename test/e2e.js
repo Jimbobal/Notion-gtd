@@ -366,45 +366,6 @@ const addDays = (s, n) => { const [y, m, d] = s.split('-').map(Number); const dt
   await page.screenshot({ path: `${SHOTS}/12-settings-light.png`, fullPage: true });
   await page.click('[data-act=pref-theme][data-v=auto]');
 
-  /* ── 14b. External calendar feed (read-only subscription) ── */
-  await go('#/integrations');
-  await page.waitForSelector('#feed-add-form');
-  await page.fill('#feed-add-form input[name=name]', 'Work');
-  await page.fill('#feed-add-form input[name=url]', 'http://127.0.0.1:4999/ics/test.ics');
-  await page.click('#feed-add-form button[type=submit]');
-  await toastIs(/Subscription added/);
-  await page.waitForFunction(() => /fetched just now/.test(document.querySelector('#svc-ics')?.textContent || ''));
-  await go('#/calendar');
-  await page.waitForSelector('.feed-legend');
-  await page.waitForFunction(() => /Dentist/.test(document.querySelector('#view')?.textContent || ''));
-  const pad = n => String(n).padStart(2, '0');
-  const dent = new Date(); dent.setUTCHours(13, 0, 0, 0);
-  const expectTime = `${pad(dent.getHours())}:${pad(dent.getMinutes())}`;
-  const dentistRow = await page.textContent('.event:has-text("Dentist")');
-  assert.ok(dentistRow.includes(expectTime), `event shows local time ${expectTime}: ${dentistRow}`);
-  assert.match(dentistRow, /High Street/);
-  assert.match(await textOf('#view'), /Conference/);
-  assert.ok(!/Cancelled thing/.test(await textOf('#view')), 'cancelled events are hidden');
-  assert.ok(/Standup/.test(await textOf('#view')), 'recurring events expand');
-  await page.screenshot({ path: `${SHOTS}/15-calendar-unified.png`, fullPage: true });
-  /* toggle the feed off and on */
-  await page.click('.pill.feed');
-  await page.waitForFunction(() => !/High Street/.test(document.querySelector('#view')?.textContent || ''));
-  await page.click('.pill.feed');
-  await page.waitForFunction(() => /High Street/.test(document.querySelector('#view')?.textContent || ''));
-  /* export */
-  const [dl] = await Promise.all([page.waitForEvent('download'), page.click('[data-act=cal-export]')]);
-  assert.equal(dl.suggestedFilename(), 'gtd-calendar.ics');
-  const icsText = require('fs').readFileSync(await dl.path(), 'utf8');
-  assert.match(icsText, /BEGIN:VCALENDAR/); assert.match(icsText, /SUMMARY:Dentist appointment/);
-  /* add-to-calendar links on a dated item */
-  await page.click(`[data-act=cal-day][data-v="${addDays(todayISO(), 1)}"]`);
-  await page.click('#view .item:has-text("Dentist appointment")');
-  await page.waitForSelector('#sheet a[href^="https://calendar.google.com/"]');
-  assert.ok(await page.$('#sheet a[href^="https://outlook.live.com/"]'));
-  await page.keyboard.press('Escape');
-  await page.click('[data-act=cal-clear]');
-
   /* ── 14c. Integrations: Google Calendar, Drive, Dropbox ───── */
   await go('#/integrations');
   await page.waitForSelector('#google-form');
@@ -465,6 +426,11 @@ const addDays = (s, n) => { const [y, m, d] = s.split('-').map(Number); const dt
   assert.ok(lunch && /T12:30:00$/.test(lunch.start.dateTime) && /T13:15:00$/.test(lunch.end.dateTime), 'timed event created');
   await page.waitForFunction(() => /Lunch with Sam/.test(document.querySelector('#view')?.textContent || ''));
   await page.screenshot({ path: `${SHOTS}/17-calendar-google.png`, fullPage: true });
+  /* export the app's own items as .ics */
+  const [dl] = await Promise.all([page.waitForEvent('download'), page.click('[data-act=cal-export]')]);
+  assert.equal(dl.suggestedFilename(), 'gtd-calendar.ics');
+  const icsText = require('fs').readFileSync(await dl.path(), 'utf8');
+  assert.match(icsText, /BEGIN:VCALENDAR/); assert.match(icsText, /SUMMARY:Dentist appointment/);
   /* a Google event becomes a GTD item, linked, and the read-only original is left alone */
   await page.click('.event:has-text("Bank holiday")');
   await page.waitForSelector('[data-act=ev-to-item]');
@@ -573,7 +539,7 @@ const addDays = (s, n) => { const [y, m, d] = s.split('-').map(Number); const dt
   assert.equal(await page.evaluate(() => window.__revoked), 'tok_client-123', 'token revoked');
   await go('#/calendar');
   await page.waitForFunction(() => !/Standup \(moved\)/.test(document.querySelector('#view')?.textContent || ''));
-  assert.ok(!/James/.test(await textOf('.feed-legend')), 'Google calendars gone from the legend');
+  assert.ok(!(await page.$('.feed-legend')), 'no calendar legend once Google is disconnected');
 
   /* ── 18. Adopt on a second device ─────────────────────────── */
   const ctx2 = await browser.newContext({ viewport: { width: 390, height: 844 } });

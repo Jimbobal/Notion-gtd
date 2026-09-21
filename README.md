@@ -23,7 +23,7 @@ The FacileThings model, end to end:
 | **Perspectives** | Saved filters across every list, stored in Notion so they follow you between devices. |
 | **Statistics** | System health tiles, completed-per-week, by-context breakdowns, habit rates. |
 | **Trash** | Restore, or empty into Notion's own trash (recoverable there for 30 days). |
-| **Integrations** | One card per service: Notion, Google Calendar & Drive, Dropbox, and read-only calendar subscriptions. |
+| **Integrations** | One card per service: Notion, Google Calendar & Drive, Dropbox. |
 | **Settings** | The Notion connection, contexts and tags, theme, week start, review day. |
 
 Items carry a status (which list), a context, tags, project, area, date, time,
@@ -81,14 +81,11 @@ picker or the Dropbox chooser, or paste a link (a Notion page, say). The app
 only ever receives a name and a link, stored on the Notion page as an
 external file, so they show in Notion too.
 
-## Calendar subscriptions (read-only)
+## Not Google?
 
-For any other calendar there is still the `.ics` route: paste a private
-subscription address on the Integrations page and its events are drawn in,
-read-only, through `api/ics.js`. The reader in `js/ics.js` handles time zones,
-durations, the common recurrence rules, exceptions and moved occurrences. Any
-dated item also offers Google Calendar and Outlook links and an `.ics`
-download, and the Calendar exports every dated item as one `.ics` file.
+The Calendar can export every dated item as one `.ics` file for import into
+any other calendar. That is the only non-Google calendar path; there are no
+subscription links.
 
 ## Credentials you create once
 
@@ -100,7 +97,7 @@ download, and the Calendar exports every dated item as one `.ics` file.
 The Integrations page shows the exact steps and the origin to paste. Both are
 public identifiers, stored on the device with the rest of the config.
 
-## The relays
+## The relay
 
 Notion's API sends no CORS headers, so a browser cannot call it. The one piece
 of server here is `api/notion/[...path].js`, a Vercel function that forwards a
@@ -109,10 +106,6 @@ token, no database and no log: the token arrives in the caller's
 `Authorization` header and goes straight through. It forwards only the
 endpoints the app uses (`users/me`, `search`, `databases`, `databases/:id`,
 `databases/:id/query`, `pages`, `pages/:id`) and refuses everything else.
-
-`api/ics.js` does the same for calendar feeds, which also send no CORS
-headers: it fetches the `.ics` at the address given and returns the text,
-https only, capped at 4MB, nothing kept.
 
 ## Setup
 
@@ -137,19 +130,17 @@ environment variables are needed.
 
 ```bash
 node dev-server.js               # http://localhost:4180, relays included
-bash test/run.sh                 # relay, iCalendar and import checks, then the browser end-to-end
-node test/ics.test.mjs           # the iCalendar reader alone
+bash test/run.sh                 # relay and import checks, then the browser end-to-end
 ```
 
 The end-to-end test needs Playwright's Chromium; point `NODE_PATH` at a
 `node_modules` that has `playwright` (for example `$(npm root -g)`). The mock
 in `test/mock-notion.js` implements enough of Notion — search, database
 create/read/update/query, page create/read/update/archive — for the whole
-setup and every screen to run without a real workspace, and serves a sample
-calendar feed; `test/google-mock.js` stands in for Google sign-in, the
-Calendar API, the Drive picker and the Dropbox chooser inside the browser.
-Set `NOTION_UPSTREAM` to point the relay at the mock and `ICS_ALLOW_HTTP=1`
-to let the feed relay fetch plain http locally.
+setup and every screen to run without a real workspace; `test/google-mock.js`
+stands in for Google sign-in, the Calendar API, the Drive picker and the
+Dropbox chooser inside the browser. Set `NOTION_UPSTREAM` to point the relay
+at the mock.
 
 ## Layout
 
@@ -167,7 +158,6 @@ js/gcal.js                   Google Calendar: read, write, mirror items
 js/files.js                  Drive picker, Dropbox chooser, links
 js/ics.js, js/feeds.js       iCalendar reader; calendar sources and cache
 api/notion/[...path].js      the Notion relay
-api/ics.js                   the calendar feed relay
 dev-server.js                static files + relay, locally
-test/                        mock Notion, Google/Dropbox stubs, relay and iCalendar tests, end-to-end
+test/                        mock Notion, Google/Dropbox stubs, relay tests, end-to-end
 ```

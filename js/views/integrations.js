@@ -1,7 +1,6 @@
 /* Integrations — one card per service, its state, a Connect / Disconnect
    and its options. Notion is the store; Google gives the two-way calendar
-   and Drive attachments; Dropbox gives attachments; .ics subscriptions are
-   the read-only fallback for any other calendar. */
+   and Drive attachments; Dropbox gives attachments. */
 'use strict';
 import { state, cfg } from '../store.js';
 import { esc, attr, toast, field, options, plural } from '../ui.js';
@@ -10,7 +9,6 @@ import { ago } from '../model.js';
 import { gcfg, saveGoogle, googleConfigured, googleConnected, connectGoogle, disconnectGoogle } from '../google.js';
 import { listCalendars, setCalendars, googleCalendars, writableCalendars, syncAllItemsToGoogle, googleFetchedAt, googleError, clearGoogleEvents } from '../gcal.js';
 import { dcfg, saveDropbox, dropboxReady, driveReady } from '../files.js';
-import { feeds, addFeed, removeFeed, toggleFeed, feedError, feedFetchedAt } from '../feeds.js';
 
 export const title = () => 'Integrations';
 let busy = '';
@@ -79,19 +77,9 @@ function dropboxCard() {
       <div class="actions"><button type="submit" class="btn">Save</button>${dropboxReady() ? '<button type="button" class="btn danger" data-act="d-disconnect">Remove</button>' : ''}</div></form>`);
 }
 
-function icsCard() {
-  return card('ics', { cls: 'cal', glyph: '▦' }, 'Calendar subscriptions', 'Read-only fallback for any other calendar (Outlook, iCloud, a shared team calendar): its private .ics address.',
-    feeds().length ? `<span class="status on">${plural(feeds().length, 'feed')}</span>` : '<span class="status">None</span>',
-    `${feeds().map(f => `<div class="opt-row"><i class="feed-dot" style="--fc:${f.color}"></i><div class="grow">${esc(f.name)}<div class="sub">${esc(f.url.replace(/^https?:\/\/([^/]+).*$/, '$1'))} · ${feedError(f.id) ? `<span class="bad">${esc(feedError(f.id))}</span>` : feedFetchedAt(f.id) ? 'fetched ' + ago(new Date(feedFetchedAt(f.id)).toISOString()) : 'not fetched yet'}</div></div>
-      <label class="check-row" style="margin:0;padding:6px 8px"><input type="checkbox" data-act-change="feed-on" data-id="${f.id}" ${f.on ? 'checked' : ''}></label>
-      <button class="link-btn" data-act="feed-remove" data-id="${f.id}">Remove</button></div>`).join('')}
-    <form id="feed-add-form" class="opt-row"><input type="text" name="name" placeholder="Name" style="flex:0 1 110px"><input type="text" name="url" placeholder="https://…/basic.ics or webcal://…" required><button class="btn small" type="submit">Add</button></form>
-    <p class="note">Outlook: Settings → Calendar → Shared calendars → Publish → ICS link. iCloud: share the calendar publicly and copy its link.</p>`);
-}
-
 export function render() {
   return `<p class="hint">Connect the services the app works with. Keys and tokens stay in this browser.</p>
-    ${notionCard()}${googleCard()}${dropboxCard()}${icsCard()}`;
+    ${notionCard()}${googleCard()}${dropboxCard()}`;
 }
 
 async function loadCals() {
@@ -115,7 +103,6 @@ export async function act(name, el) {
       case 'g-reload': busy = 'Loading…'; document.dispatchEvent(new CustomEvent('gtd:render')); try { await loadCals(); } finally { busy = ''; } return 'render';
       case 'g-refresh': document.dispatchEvent(new CustomEvent('gtd:google')); toast('Refreshing events…'); return true;
       case 'd-disconnect': saveDropbox({ appKey: '' }); toast('Dropbox removed'); return 'render';
-      case 'feed-remove': removeFeed(id); toast('Subscription removed'); return 'render';
     }
   } catch (e) { busy = ''; toast(e.message, 6000); return 'render'; }
   return false;
@@ -131,7 +118,6 @@ export async function change(el) {
       if (el.checked) { toast('Copying your Calendar items to Google…', 4000); const n = await syncAllItemsToGoogle(); toast(`${n} item${n === 1 ? '' : 's'} mirrored ✓`); document.dispatchEvent(new CustomEvent('gtd:google')); }
       return 'render';
     }
-    if (what === 'feed-on') { toggleFeed(id); return 'render'; }
   } catch (e) { toast(e.message, 6000); return 'render'; }
   return false;
 }
@@ -147,13 +133,5 @@ export async function submit(form) {
     return true;
   }
   if (form.id === 'dropbox-form') { saveDropbox({ appKey: f.appKey.trim() }); toast(f.appKey.trim() ? 'Dropbox ready ✓' : 'Saved'); document.dispatchEvent(new CustomEvent('gtd:render')); return true; }
-  if (form.id === 'feed-add-form') {
-    const url = f.url.trim();
-    if (!/^(https?|webcal):\/\//i.test(url)) { toast('That does not look like a calendar address.'); return true; }
-    addFeed({ name: f.name.trim() || 'Calendar', url });
-    toast('Subscription added — fetching…');
-    document.dispatchEvent(new CustomEvent('gtd:feeds'));
-    return true;
-  }
   return false;
 }

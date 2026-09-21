@@ -12,7 +12,6 @@ const fs   = require('fs');
 const path = require('path');
 
 const relay = require('./api/notion/[...path].js');
-const ics   = require('./api/ics.js');
 const ROOT  = __dirname;
 const PORT  = Number(process.env.PORT || 4180);
 
@@ -25,7 +24,6 @@ const TYPES = {
 http.createServer((req, res) => {
   const url = new URL(req.url, `http://${req.headers.host || 'localhost'}`);
   if (url.pathname.startsWith('/api/notion')) return relay(req, res);
-  if (url.pathname === '/api/ics') return ics(req, res);
 
   let p = decodeURIComponent(url.pathname);
   if (p.endsWith('/')) p += 'index.html';
@@ -38,4 +36,4 @@ http.createServer((req, res) => {
     res.setHeader('Cache-Control', 'no-store');
     res.end(data);
   });
-}).listen(PORT, () => console.log(`GTD → http://localhost:${PORT}  (relays at /api/notion and /api/ics)`));
+}).listen(PORT, () => console.log(`GTD → http://localhost:${PORT}  (Notion relay at /api/notion)`));
